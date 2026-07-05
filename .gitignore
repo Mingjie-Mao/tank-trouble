@@ -3,3 +3,7 @@ __pycache__/
 .DS_Store
 .venv/
 venv/
+
+# 训练产物 (二进制模型 / tensorboard 事件, 队友自行训练生成)
+training/models/*.zip
+training/tb_logs/
