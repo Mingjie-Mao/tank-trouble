@@ -1,0 +1,20 @@
+stop();
+glowAlpha = 0;
+useHandCursor = true;
+onRelease = function()
+{
+};
+onEnterFrame = function()
+{
+   if(this.hitTest(_root._xmouse,_root._ymouse,true))
+   {
+      glowAlpha = Math.min(1,glowAlpha + 0.1);
+   }
+   else
+   {
+      glowAlpha = Math.max(0,glowAlpha - 0.1);
+   }
+   var _loc3_ = 8947967;
+   var _loc4_ = new flash.filters.GlowFilter(_loc3_,glowAlpha,5,5,3,3,false,false);
+   this.filters = new Array(_loc4_);
+};
