@@ -31,11 +31,15 @@ class WinRateCallback(BaseCallback):
     """每 rollout 统计训练局的胜/负/平, 写入 TensorBoard;
     定期做确定性评估并保存最优模型。"""
 
-    def __init__(self, eval_every_steps=500_000, eval_rounds=100):
+    def __init__(self, eval_every_steps=500_000, eval_rounds=100,
+                 reward_version=2, obs_traj=False, frame_skip=2):
         super().__init__()
         self.results = []
         self.eval_every = eval_every_steps
         self.eval_rounds = eval_rounds
+        self.reward_version = reward_version   # 评估口径与训练目标一致
+        self.obs_traj = obs_traj
+        self.frame_skip = frame_skip
         self._next_eval = eval_every_steps
         self.best_win_rate = -1.0
 
@@ -69,7 +73,8 @@ class WinRateCallback(BaseCallback):
                 print(f"  ✓ 新最优, 已保存 {path}.zip")
 
     def _deterministic_eval(self):
-        env = TankTroubleGym(seed=880000)
+        env = TankTroubleGym(seed=880000, reward_version=self.reward_version,
+                             obs_traj=self.obs_traj, frame_skip=self.frame_skip)
         wins = 0
         for i in range(self.eval_rounds):
             env._base_seed = 880000 + i
@@ -91,7 +96,24 @@ def main():
     ap.add_argument("--envs", type=int, default=12)
     ap.add_argument("--resume", default=None)
     ap.add_argument("--lr", type=float, default=3e-4)
-    ap.add_argument("--reward-version", type=int, default=2, choices=[1, 2, 3])
+    ap.add_argument("--reward-version", type=int, default=2,
+                    choices=[1, 2, 3, 4, 5],
+                    help="1 纯胜负; 2 开火塑形; 3 闪避实验; "
+                         "4 真规则(原版计分终局); 5 v4+密集闪避压力(需 --obs-traj)")
+    ap.add_argument("--obs-traj", action="store_true",
+                    help="附加弹道预演观测 (76 -> 121 维)")
+    ap.add_argument("--min-spawn-dist", type=int, default=0,
+                    help="训练去偏: 重掷出生路径距离小于该格数的局 (评估不受影响)")
+    ap.add_argument("--dd-penalty", type=float, default=-0.2,
+                    help="双亡终局奖励 (v4+; 更负 = 更不鼓励换子)")
+    ap.add_argument("--ent-coef", type=float, default=None,
+                    help="覆盖熵系数 (默认沿用 checkpoint/0.01; 精修可降至 0.003)")
+    ap.add_argument("--frame-skip", type=int, default=2,
+                    help="每决策重复帧数 (1 = 每帧决策, 10° 瞄准粒度)")
+    ap.add_argument("--bad-shot", type=float, default=-0.15,
+                    help="开火时模拟为 SUICIDE 的即时惩罚 (自伤纪律)")
+    ap.add_argument("--time-escalate", action="store_true",
+                    help="时间惩罚随局长递增 (压拖长局)")
     ap.add_argument("--tag", default="v2", help="TensorBoard 运行名前缀")
     args = ap.parse_args()
 
@@ -99,13 +121,24 @@ def main():
     os.makedirs(TB_DIR, exist_ok=True)
 
     vec_env = SubprocVecEnv([
-        make_env(i, base_seed=1, reward_version=args.reward_version)
+        make_env(i, base_seed=1, reward_version=args.reward_version,
+                 obs_traj=args.obs_traj, min_spawn_cells=args.min_spawn_dist,
+                 dd_reward=args.dd_penalty, frame_skip=args.frame_skip,
+                 bad_shot=args.bad_shot, time_escalate=args.time_escalate)
         for i in range(args.envs)])
-    print(f"奖励版本: v{args.reward_version}   并行环境: {args.envs}")
+    print(f"奖励版本: v{args.reward_version}   并行环境: {args.envs}   "
+          f"弹道预演观测: {'开' if args.obs_traj else '关'}   "
+          f"出生去偏: {args.min_spawn_dist} 格   双亡奖励: {args.dd_penalty}")
 
     if args.resume:
-        model = PPO.load(args.resume, env=vec_env, device="cpu")
-        print(f"从 {args.resume} 继续训练")
+        # 覆盖 checkpoint 内嵌的 tensorboard 路径与学习率
+        # (长训实测: 恒定 3e-4 续训只在最优附近震荡, 精修需要降 lr)
+        overrides = {"learning_rate": args.lr}
+        if args.ent_coef is not None:
+            overrides["ent_coef"] = args.ent_coef
+        model = PPO.load(args.resume, env=vec_env, device="cpu",
+                         tensorboard_log=TB_DIR, custom_objects=overrides)
+        print(f"从 {args.resume} 继续训练 (覆盖 {overrides})")
     else:
         model = PPO(
             "MlpPolicy",
@@ -126,7 +159,9 @@ def main():
         )
 
     callbacks = [
-        WinRateCallback(eval_every_steps=500_000, eval_rounds=100),
+        WinRateCallback(eval_every_steps=500_000, eval_rounds=100,
+                        reward_version=args.reward_version,
+                        obs_traj=args.obs_traj, frame_skip=args.frame_skip),
         CheckpointCallback(save_freq=max(1_000_000 // args.envs, 1),
                            save_path=MODELS_DIR,
                            name_prefix="ppo_tt"),

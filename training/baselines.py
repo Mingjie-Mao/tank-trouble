@@ -67,6 +67,75 @@ class RandomPolicy:
         }
 
 
+class ExploitBot:
+    """漏洞验证脚本 — 量化"静止窗口"漏洞的利用上限 (白盒读引擎, 上界估计)。
+
+    2000 局挖掘结论: Laika 的稳定弱点不是弹药/位置, 而是静止状态 ——
+    卡墙 lift 2.87, 刚开火 1s 内 lift 1.57, idle/shootAfter 死前画像 1.2-1.4。
+
+    战术: 继承 Hunter (躲弹/最短路接敌/弹道模拟开火), 在 Laika 处于
+    静止窗口时切换强攻 — 放宽开火角度阈值抢时机, 全速逼近。
+    """
+    name = "exploit"
+
+    FIRE_WINDOW = 25     # Laika 开火后的僵直窗口 (帧)
+    STILL_GOALS = ("idle", "shootAfter", "fireWeapon", "turnTo")
+
+    def __init__(self):
+        self._hunter = HunterPolicy()
+        self._laika_last_fire = None
+        self._prev_laika_fired = 0
+
+    def reset(self):
+        self._hunter.reset()
+        self._laika_last_fire = None
+        self._prev_laika_fired = 0
+
+    def _laika_stationary(self, game):
+        """Laika 是否处于静止窗口: 卡墙 / 刚开火 / 瞄准类目标"""
+        en = game.tanks[1]
+        if en.hit_something:
+            return True
+        # 用弹数增量近似"它刚开火"(白盒也可读事件, 这里保持 act(game) 接口)
+        if en.bullets_fired > self._prev_laika_fired:
+            self._laika_last_fire = game.frame
+        self._prev_laika_fired = en.bullets_fired
+        if (self._laika_last_fire is not None
+                and game.frame - self._laika_last_fire <= self.FIRE_WINDOW):
+            return True
+        if en.ai is not None:
+            goal = en.ai.my_goal.get("goal", "")
+            if goal in self.STILL_GOALS:
+                return True
+            # 动作栈顶是瞄准/开火类动作 = 正在站定
+            if en.ai.my_actions:
+                act = en.ai.my_actions[-1].get("action", "")
+                if act in ("turnTo", "fireWeapon"):
+                    return True
+        return False
+
+    def act(self, game):
+        me = game.tanks[0]
+        en = game.tanks[1]
+        if not me.alive or not en.alive:
+            return {}
+        stationary = self._laika_stationary(game)
+        out = self._hunter.act(game)
+
+        if stationary and not out.get("fire"):
+            # 静止窗口强攻: 放宽 Hunter 的角度阈值, 只要模拟命中就开火
+            dx, dy = en.x - me.x, en.y - me.y
+            dist = math.hypot(dx, dy)
+            has_los = HunterPolicy._los(game, me.x, me.y, en.x, en.y)
+            if (has_los and abs(_norm180(
+                    math.degrees(math.atan2(dy, dx)) + 90 - me.rotation)) < 25
+                    and me.bullets_fired < game.settings_max_bullets):
+                res = self._hunter._bullet_sim(game).check_bullet_path(me.rotation)
+                if res["result"] == "HIT":
+                    out["fire"] = True
+        return out
+
+
 class HunterPolicy:
     """手写猎杀脚本 (RL 的及格线)
 

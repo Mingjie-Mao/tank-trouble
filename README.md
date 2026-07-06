@@ -3,8 +3,10 @@
 基于反编译源码逐行移植的 Tank Trouble vs Laika 模式（逻辑/常量/帧序与原版
 Flash 一致），并在其上训练强化学习智能体击败原版 AI「Laika」。
 
-**当前最好成绩：稳定 ~50% 胜率**（1500 局评估均值 50.5%，自杀 0，平局 ≈0）。
-即从对手手里拿到半数胜场。详见下方「训练成果」。
+**当前最好成绩：原版真规则胜率 33.4% ± 2.1%**（2000 局全新种子终审，
+冠军模型 `training/models/p8_badshot_best.zip`）。
+旧口径（destroy 即判胜）下为 52.1%，与早期 README 的 50.5% 同口径可比。
+口径差异见下方「胜率口径」——**这是接手前必读的一节**。
 
 ---
 
@@ -23,102 +25,96 @@ python3 test_original_port.py                    # 运行验证 (25 项检查)
 
 ---
 
-## 二、训练成果与结论
+## 二、胜率口径（重要！两套数字不能混）
 
-### 做了什么，到了什么程度
+- **先杀率（旧口径）**：训练环境在首个 destroy 事件即判胜——先杀掉 Laika 就算赢，
+  哪怕 3 秒内被余弹/自己的反弹弹打死。早期"50.5%"即此口径。
+- **真胜率（原版规则）**：原版在击杀后 125 帧、endCount==50 计分点看谁存活；
+  先杀后死 = 双亡 = 不得分。**对外宣称"击败 Laika"必须用这个口径。**
 
-| 阶段 | 真实胜率 | 说明 |
-|---|---|---|
-| 随机策略 | 5% | 87% 死于自己的反弹弹 |
-| 手写猎杀脚本 | 30% | RL 的「及格线」基准 |
-| **v1**（纯胜负奖励） | 19% | ❌ 卡死——学会「苟活躲弹」的局部最优，不敢开火 |
-| **v2**（+ 开火塑形）★ | **50–53%** | ✅ 突破。奖励「瞄准后果断开火」，根治苟活+自杀 |
-| v3（+ 闪避奖励） | 37% | ❌ 失败。闪避奖励太弱被模型忽略，已放弃 |
-
-**最终交付模型 = v2**（`training/models/best_model.zip`）。
-
-### 关键决策复盘（给接手队友）
-
-1. **v1→v2 的转折**：用 200 局对局数据定位到「每局只打 1.1 发弹」的苟活陷阱
-   （躲到平局比开火冒险更划算）。重构奖励激励果断开火后，胜率翻 2.5 倍。
-2. **顶住「假平台」**：训练中确定性评估多次走平，但通过看**训练胜率+熵**能
-   区分「真平台」和「收敛滞后」，避免了过早干预。→ 训练回调的 100 局评估
-   噪声极大（系统性偏低 8–11 个点），**一律以 500 局离线评估为准**。
-3. **v3 及时止损**：行为数据（危险步 6.9% vs 6.2%、闪避 0.37% vs 0.3%）证明
-   闪避奖励**根本没改变模型行为**——稀疏(+0.15)信号被 PPO 忽略。避免浪费算力。
+实测差异（同种子对比）：早期 v2 模型先杀率 51.2%，真胜率仅 22.1%——差的
+29 个点全是"神风换子"回合（双亡率 40.8%）。`training/evaluate.py` 现默认输出
+双口径 + 行为指标，旧协议保留在 `--legacy`。
 
 ---
 
-## 三、观察到的 AI 行为（看录像总结，重要）
+## 三、训练成果（模型演进，全部同协议可比）
 
-当前 v2 模型胜率 ~50%，但**打法是「投机」而非「真本事」**，天花板由此而来：
+| 模型 | 关键改动 | 真胜率 | 双亡率 | 备注 |
+|---|---|---:|---:|---|
+| random 基线 | — | 0.5% | 8.5% | 91% 死于自己反弹弹 |
+| v1 `v1_best_19pct.zip` | 纯胜负奖励 | 12.4% | 14.4% | 苟活不开火 |
+| v2 `v2_teammate_50pct.zip` | + 开火质量塑形 | 22.1% | 40.8% | 先杀率 51.2%, 神风换子流 |
+| Hunter 手写脚本 | 利用已知弱点 | 22.5% | 14.5% | RL 及格线 |
+| v4 | 终局改原版计分 + 击杀/死亡事件奖励 | 23.8% | 38.2% | 只改激励几乎无效 |
+| P2 | + **弹道预演观测** (76→121 维) | 30.4% | 29.6% | **最大单项 +8** |
+| P6 `p6_sharpen_best.zip` | + 去偏/闪避压力/熵精修 | 31.5% | 28.9% | |
+| **P8 `p8_badshot_best.zip`** | + **自伤弹惩罚 -0.45** | **33.4%** | 27.3% | **← 交付冠军** |
 
-1. **不会跑图**。它不主动穿越迷宫找 Laika，而是**原地等 Laika 过来**。
-2. **以量取胜，不靠瞄准**。策略是**朝 Laika 方向一次性泼很多发子弹**（哪怕
-   中间隔着墙也照准方向打），本质是「以逸待劳 + 乱拳打死老师傅」。
-3. **没学会躲避**。根因疑为**地图种子机制**：原版大量存在「双方出生就很近」
-   的布局，很多胜局其实是**刷到近距离图 → 谁瞄准快谁赢**的对射。所以调闪避
-   它无动于衷——与其学躲，不如赌运气刷个近图直接对射。
-4. **在摆烂**。相当多回合它消极拖时间。
+冠军行为画像：击杀 57% 经反弹、45% 隔墙发射（高级弹道成型）；自杀率
+28.6%→19.6%；场均移动 4.1→5.7 格。完整 12 轮探针记录（含全部失败实验）
+见 **training/EXPERIMENTS.md**。
 
-> 一句话：v2 学到的是「站桩泼弹 + 赌近距离图」，不是「机动 + 精确打击」。
-> 要突破 50%，必须逼它学会主动进攻和真正的走位躲避。
+### 关键决策复盘（接手必读）
 
----
+1. **v1→v2**（前任）：开火质量塑形治"苟活不开火"，胜负奖励卡 19% 的破局点。
+2. **口径修正**（本轮）：训练目标必须定义在原版计分点上，否则 PPO 会把
+   "杀完同归于尽"当成赢（reward v4 起修正）。
+3. **缺信息不缺激励**：只改奖励 +1.7，给观测加弹道几何 +8——模型看不见
+   反弹弹道时，任何闪避奖励都学不动（v3 失败的根因）。
+4. **胜负头号变量 = 自己的反弹弹**：胜局自伤率 0%、败局 22%、双亡 40%
+   （1500 局对照）。自伤弹惩罚从 -0.15 提到 -0.45 得 +3.6，
+   剂量曲线 -0.15/-0.45/-0.75 = 31.5/35.1/31.9，峰值在 -0.45。
+5. **测量纪律**：训练回调的 100 局评估噪声 ±9 个点、择优保存会过拟合运气；
+   **一切判定以全新种子 1000+ 局离线评估为准**（本轮用 970000 种子基）。
 
-## 四、接下来的思路（队友可直接接手）
+### 已证伪的方向（别再走）
 
-按优先级排列，都值得各跑一轮 300 万步验证（约 20 分钟/轮）：
-
-### 思路 A：加大时间惩罚，逼它主动出击（★ 首选，对应观察 4）
-当前 `R_TIME_PENALTY = -0.002` 太温和，纵容摆烂。改为**随时间递增的惩罚**
-（局面拖得越久扣得越狠），逼它尽快解决战斗而非站桩等运气。
-- 改 `training/tt_gym_env.py` 的 `R_TIME_PENALTY`，或在 `step()` 里改成
-  `reward += R_TIME_PENALTY * (self._frames / TRUNCATE_FRAMES)` 让惩罚随帧数放大。
-- 也可同时**缩短 `TRUNCATE_FRAMES`**（当前 2500），压缩苟活空间。
-
-### 思路 B：改进闪避奖励（对应观察 3，v3 失败的正确修法）
-v3 的方向没错，错在信号**稀疏又微弱**。改成**密集连续信号**：每帧按「距最近
-来袭弹多远」给梯度奖励（越靠近来袭弹扣分越多），而非只在「化解锁定」的稀疏
-瞬间给 +0.15。这样 PPO 才学得到。相关代码：`_incoming_will_hit()` 已能判定
-威胁，把它改成返回「最近来袭弹的距离」即可做梯度。
-
-### 思路 C：地图课程/去偏（对应观察 3 根因）
-如果对射胜局是「近距离图运气」，可在训练时**过滤或降采样近距离出生的种子**，
-逼它在「必须跑图接近」的图上学习机动。`Game` 的出生点由种子决定，可在 env
-的 `reset()` 里检测双方初始格距离、太近就换种子。
-
-### 思路 D：先手奖励（对应观察 2）
-奖励「比 Laika 更早开出有效弹」，鼓励主动压制而非对灌。
+- frame_skip 2→1（细瞄准粒度）：时序翻倍学习难度 > 收益，-3 个点；
+- 递增时间惩罚、近距图混训、纯续训整合、低 lr 单独用：均无增益；
+- **ExploitBot 漏洞课程**：弹尽/卡墙/角落等单一窗口漏洞经 2000 局分析 +
+  三版脚本验证，利用上限 ≈ Hunter 水平（<40% 闸门）。"Laika 卡墙"局胜率
+  49% 是真的，但那是模型用弹幕压迫诱导的隐式技能，脚本造不出来；
+- 恒定 lr 3e-4 长训：3M 探针后只在最优附近震荡（P2/P4 长训两次验证）。
 
 ---
 
-## 五、训练相关指令
+## 四、下一步思路（按证据强度排序）
+
+1. **命中率专项**：12% 命中率全程横盘，是最顽固短板。候选：收紧
+   R_WASTE_SHOT、射击扇加宽（±30°→±50°）给更多预瞄选项；
+2. **近距图双亡 43%**：训练去偏(min-spawn 4)使近图成为分布盲区，
+   朴素混训已证伪，需距离加权的双亡惩罚等更精细方案；
+3. **网络加宽 512**：121 维特征可能受 256×256 瓶颈（需从零训，成本高）；
+4. **算力升级**：本机 3M 步探针尺度已挖尽，租多核 CPU 跑 5000 万步
+   （瓶颈在 CPU 采样，不需要 GPU）。
+
+---
+
+## 五、训练与评估指令
 
 ```bash
-# 安装依赖 (torch 已有的话只需后两个)
 pip install stable-baselines3 tensorboard gymnasium
 
-# 训练 (reward-version: 1=纯胜负 2=开火塑形(最优) 3=闪避实验)
-python3 training/train_ppo.py --steps 10000000 --envs 12 --reward-version 2 --tag v2
-#   后台+防睡眠: 前面加 caffeinate -i, 末尾加 > training/train_v2.log 2>&1 &
+# 训练冠军配置 (reward v5 + 弹道预演观测 + 去偏 + 自伤纪律)
+python3 -u training/train_ppo.py --steps 3000000 --envs 12 \
+    --reward-version 5 --obs-traj --min-spawn-dist 4 \
+    --lr 0.0001 --ent-coef 0.003 --bad-shot -0.45 \
+    --resume training/models/p8_badshot_best.zip --tag my_probe
+# 注意: 后台运行必须加 python3 -u (stdout 块缓冲会让日志看似卡死)
 
-# 评估 (务必用 500+ 局, 回调的 100 局评估噪声太大不可信)
-python3 training/evaluate.py --policy model --model training/models/best_model.zip --n 500 --seed 950000
-python3 training/evaluate.py --policy hunter --n 200      # 手写脚本基线 (~30%)
-python3 training/evaluate.py --policy random --n 200      # 随机基线 (~5%)
+# 评估 (默认双口径+行为指标; 判定用 1000+ 局全新种子)
+python3 training/evaluate.py --policy model --model training/models/p8_badshot_best.zip --n 1000 --seed 970000
+python3 training/evaluate.py --policy hunter --n 500        # 脚本基线
+python3 training/evaluate.py --policy model --legacy ...    # 旧单口径
 
-# 看录像 (tkinter 里回放模型 vs Laika, 可指定种子复现某一局)
-python3 training/watch.py --policy model --model training/models/best_model.zip
-python3 training/watch.py --policy hunter --seed 910007
+# 分析工具
+python3 training/exploit_analysis.py --model <zip> --n 2000       # Laika 状态窗口 lift
+python3 training/kill_pattern_analysis.py --model <zip> --n 1500  # 击杀画像/胜负对照/组合搜索
 
-# 训练曲线
-tensorboard --logdir training/tb_logs
+# 看录像
+python3 training/watch.py --policy model --model training/models/p8_badshot_best.zip
 ```
-
-**算力说明**：瓶颈在 CPU 采样（游戏引擎+Laika 决策），策略网络是小 MLP，
-本机 ~4400 步/秒，1000 万步约 40 分钟。**不需要 GPU**；若要大扩采样，租
-**多核 CPU** 机器（非 GPU）性价比最高。
 
 ---
 
@@ -126,29 +122,27 @@ tensorboard --logdir training/tb_logs
 
 ```
 training/
-├── tt_gym_env.py         # 训练环境 (v1/v2/v3 三档奖励, 76维观测: 自车+敌车+24射线+子弹)
-├── baselines.py          # 基线策略 (idle/random/hunter 手写猎杀脚本)
-├── evaluate.py           # 标准评估协议 (固定种子集, 胜/负/平/自杀/局长)
-├── train_ppo.py          # PPO 训练 (12并行环境, 自动保存最优)
-├── watch.py              # tkinter 录像回放
-├── models/
-│   ├── best_model.zip        # 最终模型 = v2 (~50%) ← 用这个
-│   ├── v2_best_53pct.zip     # v2 备份
-│   └── v1_best_19pct.zip     # v1 对照
-├── train_run1.log        # v1 训练日志
-├── train_v2.log          # v2 训练日志 (胜率从 5%→52% 全过程)
-└── train_v3.log          # v3 训练日志 (闪避实验, 失败)
+├── tt_gym_env.py          # 训练环境: 奖励 v1-v5, 观测 76/121 维(--obs-traj),
+│                          #   terminal_mode destroy/score, 去偏/自伤/时间惩罚参数
+├── train_ppo.py           # PPO 训练 (resume 可覆盖 lr/熵; 回调口径随奖励版本)
+├── evaluate.py            # 双口径评估协议 + 行为指标电池 (--legacy 兼容旧口径)
+├── baselines.py           # idle/random/hunter + ExploitBot(漏洞验证, 负结果留档)
+├── exploit_analysis.py    # Laika 漏洞挖掘 (状态窗口 lift)
+├── kill_pattern_analysis.py # 组合模式挖掘 (击杀画像/胜负对照)
+├── EXPERIMENTS.md         # 12 轮探针完整记录 ★接手必读
+└── models/
+    ├── p8_badshot_best.zip    # ★ 冠军 (真胜率 33.4%)
+    ├── p6_sharpen_best.zip    # 次优 (31.5%)
+    ├── v2_teammate_50pct.zip  # 早期 v2 原件 (真胜率 22.1%)
+    └── ...                    # 各探针存档 (p2-p12, 见 EXPERIMENTS.md)
 
 tank_trouble_original/     # 游戏本体 (纯 Python 零依赖, 1:1 移植)
-├── constants.py  maze.py  game.py  laika.py  env.py
 play_tank_trouble.py       # 本地游玩入口
 test_original_port.py      # 25 项验证
 PORT_NOTES.md              # 移植忠实度说明 ★
 swf_decompiled/            # 反编译源码 (81 个 .as 文件)
 GAME_MECHANICS_ANALYSIS.md # 游戏机制解读
 ```
-
----
 
 ## 七、AI 训练接口（自建训练时用）
 
@@ -158,10 +152,7 @@ from tank_trouble_original import TankTroubleEnv
 env = TankTroubleEnv(seed=42)      # tank0 = 智能体, tank1 = Laika
 state = env.reset()
 state, events = env.step({"forward": True, "turn_left": False, "fire": True})
-
-# state:  完整真值 (坦克位姿/子弹/迷宫墙体/回合状态/比分/Laika当前目标)
-# events: fire / bounce / hit / destroy / round_end / new_round
-# 无头 ~6000+ 帧/秒 (实时的 240 倍), 种子完全可复现
+# 无头 ~6000+ 帧/秒, 种子完全可复现
 ```
 
 ## 八、游戏核心机制速览（全部来自反编译源码）
@@ -173,7 +164,7 @@ state, events = env.step({"forward": True, "turn_left": False, "fire": True})
 | 坦克 | 每帧 5 子步移动, 21 碰撞点, 贴墙滑动, 10° 转向吸附 |
 | 子弹 | 每帧 7 子步, X/Y 独立反弹, 250 帧寿命, 最多 5 发 |
 | 命中 | 出膛即致命, **可打死自己** (贴墙开火会反弹自杀) |
-| 回合 | 死亡→125帧继续→50帧冻结计分→5帧后新迷宫, 比分保留 |
+| 回合 | 死亡→125帧继续→**50帧冻结计分**→5帧后新迷宫 (计分点=真胜负判定点) |
 | Laika | 目标优先级 AI, 每回合重建, 会躲避一切子弹(含自己的) |
 
 详细忠实度说明（含全部已知近似）见 **PORT_NOTES.md**。
