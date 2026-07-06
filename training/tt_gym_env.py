@@ -163,6 +163,17 @@ R_DOUBLE_DEATH = -0.2     # 双亡终局奖励 (换子略亏, 但远好于纯输
 # 上限校核: 满紧迫连续锁定 50 帧(25 决策步) ~ -0.5, 不盖过终局 ±1。
 R_THREAT_PRESSURE = -0.02  # 每决策步 x 命中紧迫度(0..1)
 
+# ---- P13 空枪纪律 (录像观察: 泼弹不瞄准, 命中率 12% 横盘) ----
+# 默认值即旧行为; 探针用 --waste-shot / --near-miss 收紧。
+NEAR_MISS_BONUS = R_GOOD_SHOT * 0.25   # 旧: 擦身弹 +0.075
+
+# ---- P14 闪避特训营 (dodge_drill=True) ----
+# 禁用开火, 只能靠走位在 Laika 火力下活命; 先特训身法再回全规则微调。
+# 奖励: 死 -1 / 活满 +0.5 / 密集威胁压力 x2 (需 obs_traj)。
+DRILL_TRUNCATE_FRAMES = 1500          # 特训单局 60 秒
+DRILL_SURVIVE_BONUS = 0.5             # 活满一局
+DRILL_PRESSURE_MULT = 2.0             # 威胁压力加倍 (身法是唯一课题)
+
 
 
 class TankTroubleGym(gym.Env):
@@ -176,7 +187,10 @@ class TankTroubleGym(gym.Env):
                  dd_reward: float = R_DOUBLE_DEATH,
                  frame_skip: int = FRAME_SKIP,
                  bad_shot: float = R_BAD_SHOT,
-                 time_escalate: bool = False):
+                 time_escalate: bool = False,
+                 waste_shot: float = R_WASTE_SHOT,
+                 near_miss: float = NEAR_MISS_BONUS,
+                 dodge_drill: bool = False):
         """terminal_mode:
         - "destroy": 首个 destroy 事件立即终局 (训练默认, 先杀即判胜)
         - "score":   跑到原版计分点 endCount==50 (round_end 事件), 先杀后死
@@ -202,6 +216,11 @@ class TankTroubleGym(gym.Env):
         self.frame_skip = frame_skip
         self._bad_shot = bad_shot
         self._time_escalate = time_escalate
+        self._waste_shot = waste_shot
+        self._near_miss = near_miss
+        self._dodge_drill = dodge_drill
+        if dodge_drill and not obs_traj:
+            raise ValueError("闪避特训依赖弹道预演观测 (obs_traj=True)")
         self.game = None
         self._sim = None             # Laika 弹道模拟器 (绑定到 tank0, 每局重建)
         self._wall_boxes = None      # (M,4) AABB 数组
@@ -247,6 +266,8 @@ class TankTroubleGym(gym.Env):
         t0.turn_left = turn == 0
         t0.turn_right = turn == 2
         t0.fire = fire == 1
+        if self._dodge_drill:
+            t0.fire = False        # 特训营缴械: 唯一课题是活下来
 
         reward = 0.0
         terminated = False
@@ -258,7 +279,8 @@ class TankTroubleGym(gym.Env):
         for _ in range(self.frame_skip):
             # v2: 开火前先判"若此帧真能发弹, 这一发好不好"
             shot_reward = 0.0
-            if self._rv >= 2 and t0.fire and g.weapon_ready(t0):
+            if (self._rv >= 2 and not self._dodge_drill
+                    and t0.fire and g.weapon_ready(t0)):
                 shot_reward = self._shot_quality(t0)
             bf_before = t0.bullets_fired
 
@@ -280,8 +302,8 @@ class TankTroubleGym(gym.Env):
             for victim in destroyed_now:
                 if victim == 0:
                     reward -= event_mag
-                else:
-                    reward += event_mag
+                elif not self._dodge_drill:
+                    reward += event_mag   # 特训营: Laika 自杀不算我方功劳
                 if self._terminal_mode == "destroy":
                     info["result"] = "loss" if victim == 0 else "win"
                     terminated = True
@@ -312,16 +334,20 @@ class TankTroubleGym(gym.Env):
 
         truncated = False
         # score 模式下已有人死亡时不截断 (计分点在 destroy 后 75 帧内必到)
-        if (not terminated and self._frames >= TRUNCATE_FRAMES
+        trunc_at = (DRILL_TRUNCATE_FRAMES if self._dodge_drill
+                    else TRUNCATE_FRAMES)
+        if (not terminated and self._frames >= trunc_at
                 and (self._terminal_mode == "destroy"
                      or self._first_destroy is None)):
             truncated = True
-            info["result"] = "draw"
-            if self._rv >= 2:
+            info["result"] = "draw"   # 特训营: draw = 活满全场 (即特训成功)
+            if self._dodge_drill:
+                reward += DRILL_SURVIVE_BONUS
+            elif self._rv >= 2:
                 reward += R_DRAW      # 苟平不再是安全港
 
-        # 势能塑形 + 时间惩罚 (只在回合进行中)
-        if not terminated:
+        # 势能塑形 + 时间惩罚 (只在回合进行中; 特训营不逼近不催时)
+        if not terminated and not self._dodge_drill:
             phi = self._phi()
             reward += GAMMA * phi - self._prev_phi
             self._prev_phi = phi
@@ -334,11 +360,13 @@ class TankTroubleGym(gym.Env):
 
         obs = self._obs()
         # v5: 闪避压力 — 站在预演命中弹道上, 按紧迫度逐步扣分
-        if self._rv >= 5 and not terminated:
+        # 特训营: 无论奖励版本都启用, 且加倍 (身法是唯一课题)
+        if (self._rv >= 5 or self._dodge_drill) and not terminated:
             block = obs[OBS_DIM:OBS_DIM + N_BULLET_SLOTS * TRAJ_BULLET_FEATS]
             block = block.reshape(N_BULLET_SLOTS, TRAJ_BULLET_FEATS)
             threat = float((block[:, 2] * (1.0 - block[:, 1])).max())
-            reward += R_THREAT_PRESSURE * threat
+            mult = DRILL_PRESSURE_MULT if self._dodge_drill else 1.0
+            reward += R_THREAT_PRESSURE * mult * threat
         return obs, reward, terminated, truncated, info
 
     def _spawn_path_cells(self):
@@ -411,8 +439,8 @@ class TankTroubleGym(gym.Env):
         # NOTHING: check_bullet_path 的 closest 是像素曼哈顿距离(有威胁时)
         closest = res.get("closest", 1e9)
         if closest <= NEAR_MISS_CELL * self.game.scale:
-            return R_GOOD_SHOT * 0.25    # 擦身而过也算施压
-        return R_WASTE_SHOT
+            return self._near_miss       # 擦身施压 (P13 起可收紧)
+        return self._waste_shot
 
     # ------------------------------------------------ 势能
 
@@ -623,7 +651,9 @@ class TankTroubleGym(gym.Env):
 def make_env(rank: int, base_seed: int = 0, reward_version: int = 2,
              obs_traj: bool = False, min_spawn_cells: int = 0,
              dd_reward: float = R_DOUBLE_DEATH, frame_skip: int = FRAME_SKIP,
-             bad_shot: float = R_BAD_SHOT, time_escalate: bool = False):
+             bad_shot: float = R_BAD_SHOT, time_escalate: bool = False,
+             waste_shot: float = R_WASTE_SHOT, near_miss: float = NEAR_MISS_BONUS,
+             dodge_drill: bool = False):
     """SubprocVecEnv 工厂 (需模块级可 pickle)"""
     def _init():
         return TankTroubleGym(seed=base_seed + rank,
@@ -633,5 +663,8 @@ def make_env(rank: int, base_seed: int = 0, reward_version: int = 2,
                               dd_reward=dd_reward,
                               frame_skip=frame_skip,
                               bad_shot=bad_shot,
-                              time_escalate=time_escalate)
+                              time_escalate=time_escalate,
+                              waste_shot=waste_shot,
+                              near_miss=near_miss,
+                              dodge_drill=dodge_drill)
     return _init

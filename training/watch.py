@@ -80,9 +80,11 @@ def main():
         policy = HunterPolicy()
     else:
         from stable_baselines3 import PPO
-        from training.tt_gym_env import TankTroubleGym
+        from training.tt_gym_env import TankTroubleGym, OBS_DIM
         model = PPO.load(args.model, device="cpu")
-        model_env = TankTroubleGym(seed=0)
+        # 与 evaluate.ModelPolicy 一致: 按模型观测维度自动识别弹道预演观测
+        traj = model.observation_space.shape[0] != OBS_DIM
+        model_env = TankTroubleGym(seed=0, obs_traj=traj)
         policy = IdlePolicy()   # 占位, 实际由 model 控制
         policy.name = "model"
 

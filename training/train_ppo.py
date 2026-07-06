@@ -32,7 +32,8 @@ class WinRateCallback(BaseCallback):
     定期做确定性评估并保存最优模型。"""
 
     def __init__(self, eval_every_steps=500_000, eval_rounds=100,
-                 reward_version=2, obs_traj=False, frame_skip=2):
+                 reward_version=2, obs_traj=False, frame_skip=2,
+                 dodge_drill=False):
         super().__init__()
         self.results = []
         self.eval_every = eval_every_steps
@@ -40,6 +41,7 @@ class WinRateCallback(BaseCallback):
         self.reward_version = reward_version   # 评估口径与训练目标一致
         self.obs_traj = obs_traj
         self.frame_skip = frame_skip
+        self.dodge_drill = dodge_drill         # 特训营: 指标 = 存活率(draw)
         self._next_eval = eval_every_steps
         self.best_win_rate = -1.0
 
@@ -74,7 +76,10 @@ class WinRateCallback(BaseCallback):
 
     def _deterministic_eval(self):
         env = TankTroubleGym(seed=880000, reward_version=self.reward_version,
-                             obs_traj=self.obs_traj, frame_skip=self.frame_skip)
+                             obs_traj=self.obs_traj, frame_skip=self.frame_skip,
+                             dodge_drill=self.dodge_drill)
+        # 特训营的成功指标 = 活满一局(draw); 常规训练 = 击杀获胜(win)
+        target = "draw" if self.dodge_drill else "win"
         wins = 0
         for i in range(self.eval_rounds):
             env._base_seed = 880000 + i
@@ -84,7 +89,7 @@ class WinRateCallback(BaseCallback):
                 action, _ = self.model.predict(obs, deterministic=True)
                 obs, _, term, trunc, info = env.step(action)
                 if term or trunc:
-                    if info.get("result") == "win":
+                    if info.get("result") == target:
                         wins += 1
                     break
         return wins / self.eval_rounds
@@ -114,6 +119,12 @@ def main():
                     help="开火时模拟为 SUICIDE 的即时惩罚 (自伤纪律)")
     ap.add_argument("--time-escalate", action="store_true",
                     help="时间惩罚随局长递增 (压拖长局)")
+    ap.add_argument("--waste-shot", type=float, default=-0.02,
+                    help="空枪惩罚: 模拟 NOTHING 且不逼近敌人的一发 (P13 收紧)")
+    ap.add_argument("--near-miss", type=float, default=0.075,
+                    help="擦身弹奖励 (P13 收紧防泼弹)")
+    ap.add_argument("--dodge-drill", action="store_true",
+                    help="闪避特训营: 禁用开火, 只练走位活命 (需 --obs-traj)")
     ap.add_argument("--tag", default="v2", help="TensorBoard 运行名前缀")
     args = ap.parse_args()
 
@@ -124,11 +135,15 @@ def main():
         make_env(i, base_seed=1, reward_version=args.reward_version,
                  obs_traj=args.obs_traj, min_spawn_cells=args.min_spawn_dist,
                  dd_reward=args.dd_penalty, frame_skip=args.frame_skip,
-                 bad_shot=args.bad_shot, time_escalate=args.time_escalate)
+                 bad_shot=args.bad_shot, time_escalate=args.time_escalate,
+                 waste_shot=args.waste_shot, near_miss=args.near_miss,
+                 dodge_drill=args.dodge_drill)
         for i in range(args.envs)])
     print(f"奖励版本: v{args.reward_version}   并行环境: {args.envs}   "
           f"弹道预演观测: {'开' if args.obs_traj else '关'}   "
-          f"出生去偏: {args.min_spawn_dist} 格   双亡奖励: {args.dd_penalty}")
+          f"出生去偏: {args.min_spawn_dist} 格   双亡奖励: {args.dd_penalty}   "
+          f"空枪/擦弹: {args.waste_shot}/{args.near_miss}   "
+          f"特训营: {'开' if args.dodge_drill else '关'}")
 
     if args.resume:
         # 覆盖 checkpoint 内嵌的 tensorboard 路径与学习率
@@ -161,7 +176,8 @@ def main():
     callbacks = [
         WinRateCallback(eval_every_steps=500_000, eval_rounds=100,
                         reward_version=args.reward_version,
-                        obs_traj=args.obs_traj, frame_skip=args.frame_skip),
+                        obs_traj=args.obs_traj, frame_skip=args.frame_skip,
+                        dodge_drill=args.dodge_drill),
         CheckpointCallback(save_freq=max(1_000_000 // args.envs, 1),
                            save_path=MODELS_DIR,
                            name_prefix="ppo_tt"),
