@@ -95,6 +95,15 @@ def train_bc(X, Y, epochs=12, batch=4096, lr=3e-4, val_frac=0.03):
     params = [p for name, p in policy.named_parameters() if "value" not in name]
     opt = torch.optim.Adam(params, lr=lr)
 
+    # 类别不均衡修正: Laika 仅 ~4% 帧开火, 无权重时克隆会坍缩成"永不开火"
+    # (P15 首跑教训: 零开火局 94%, 真胜率 8.5%)。各头逆频率加权。
+    head_weights = []
+    for col, n_cls in ((0, 3), (1, 3), (2, 2)):
+        cnt = np.bincount(Y[:, col], minlength=n_cls).astype(np.float64)
+        w = cnt.sum() / np.maximum(cnt, 1) / n_cls
+        head_weights.append(torch.as_tensor(w, dtype=torch.float32))
+        print(f"  head{col} 类别权重: {np.round(w, 2)}", flush=True)
+
     def val_acc():
         with torch.no_grad():
             dist = policy.get_distribution(Xv)
@@ -112,8 +121,10 @@ def train_bc(X, Y, epochs=12, batch=4096, lr=3e-4, val_frac=0.03):
         for i in range(0, n_train, batch):
             idx = order[i:i + batch]
             dist = policy.get_distribution(Xt[idx])
-            logp = dist.log_prob(Yt[idx])
-            loss = -logp.mean()
+            loss = 0.0
+            for head, d in enumerate(dist.distribution):
+                loss = loss + torch.nn.functional.cross_entropy(
+                    d.logits, Yt[idx, head], weight=head_weights[head])
             opt.zero_grad()
             loss.backward()
             opt.step()

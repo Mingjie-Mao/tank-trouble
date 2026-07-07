@@ -255,14 +255,19 @@ class ModelPolicy:
 
     def __init__(self, model_path, frame_skip=2):
         from stable_baselines3 import PPO
-        from training.tt_gym_env import TankTroubleGym, OBS_DIM
+        from training.tt_gym_env import TankTroubleGym, obs_dim
         self.model = PPO.load(model_path, device="cpu")
-        # 按模型输入维度自动匹配观测版本 (76 基础 / 121 弹道预演)
-        traj = self.model.observation_space.shape[0] != OBS_DIM
+        # 按模型输入维度自动匹配观测版本 (76 基础 / 121 弹道预演 / 128 +运动学)
+        dim = self.model.observation_space.shape[0]
+        traj = dim >= obs_dim(True)
+        kin = dim in (obs_dim(True, True), obs_dim(True, True, True))
+        mind = dim == obs_dim(True, True, True)
         self.frame_skip = frame_skip
-        self.env = TankTroubleGym(seed=0, obs_traj=traj, frame_skip=frame_skip)
+        self.env = TankTroubleGym(seed=0, obs_traj=traj, obs_kin=kin,
+                                  obs_mind=mind, frame_skip=frame_skip)
         self.score_env = TankTroubleGym(seed=0, terminal_mode="score",
-                                        obs_traj=traj, frame_skip=frame_skip)
+                                        obs_traj=traj, obs_kin=kin,
+                                        obs_mind=mind, frame_skip=frame_skip)
 
     def reset(self):
         pass

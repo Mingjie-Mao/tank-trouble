@@ -22,6 +22,9 @@ from gymnasium import spaces
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tank_trouble_original import Game, constants as C  # noqa: E402
+from tank_trouble_original.maze import (  # noqa: E402
+    get_shortest_path_with_distances,
+)
 
 # ---- 环境参数 ----
 FRAME_SKIP = 2            # 每个决策重复的帧数
@@ -44,8 +47,22 @@ SHOT_SIM_FRAMES = 75      # 假想炮弹前瞻 3 秒
 HIT_RADIUS_SCALE = 0.25   # 命中判定半径 (格), 近似坦克有效尺寸
 
 
-def obs_dim(obs_traj: bool) -> int:
-    return OBS_DIM + (TRAJ_DIM if obs_traj else 0)
+# ---- 观测 v3: 运动学与导航补课包 (+7 维, 需 obs_traj) ----
+# 自身速度(自我中心 2) + 自身卡墙(1) + Laika 速度(2) + 最短路下一格方位(2)
+# 治: 贴墙盲区 / 跑图方向感 / 预判 Laika 动向 (全部为屏幕可见的公平信息)
+KIN_DIM = 7
+
+# ---- 读心观测 (obs_mind=True, 白盒作弊): 直读 Laika 内部意图 (+12 维) ----
+# Laika 是确定性优先级机器, 内心状态完全暴露:
+#   目标类别 (躲弹/瞄准/逃跑/驱车) + 动作栈顶 (它已承诺的下一步)。
+# 最致命: driveToPos/Field 的目标坐标 = 预知它未来 ~10 帧的位置,
+# 可提前把反弹弹布到它要去的点; turnTo/fireWeapon = 它正站定挨打。
+MIND_DIM = 12
+
+
+def obs_dim(obs_traj: bool, obs_kin: bool = False, obs_mind: bool = False) -> int:
+    return (OBS_DIM + (TRAJ_DIM if obs_traj else 0)
+            + (KIN_DIM if obs_kin else 0) + (MIND_DIM if obs_mind else 0))
 
 
 def _reflective_closest_batch(origins, dirs, speeds, horizons,
@@ -188,6 +205,10 @@ class TankTroubleGym(gym.Env):
                  frame_skip: int = FRAME_SKIP,
                  bad_shot: float = R_BAD_SHOT,
                  time_escalate: bool = False,
+                 opponent_pool: tuple = (),
+                 laika_share: float = 0.5,
+                 obs_kin: bool = False,
+                 obs_mind: bool = False,
                  waste_shot: float = R_WASTE_SHOT,
                  near_miss: float = NEAR_MISS_BONUS,
                  dodge_drill: bool = False):
@@ -211,6 +232,13 @@ class TankTroubleGym(gym.Env):
             raise ValueError("v5 闪避压力依赖弹道预演观测 (obs_traj=True)")
         self._terminal_mode = terminal_mode
         self._obs_traj = obs_traj
+        self._obs_kin = obs_kin
+        self._obs_mind = obs_mind
+        if obs_kin and not obs_traj:
+            raise ValueError("obs_kin 依赖 obs_traj")
+        if obs_mind and not obs_traj:
+            raise ValueError("obs_mind 依赖 obs_traj")
+        self._prev_pos = {0: None, 1: None}   # 上一决策步双方位置 (速度特征)
         self._min_spawn_cells = min_spawn_cells
         self._dd_reward = dd_reward
         self.frame_skip = frame_skip
@@ -219,6 +247,12 @@ class TankTroubleGym(gym.Env):
         self._waste_shot = waste_shot
         self._near_miss = near_miss
         self._dodge_drill = dodge_drill
+        # 自博弈对手池: 冻结策略 zip 路径; 每局按 laika_share 概率仍用 Laika
+        self._opponent_pool = tuple(opponent_pool)
+        self._laika_share = laika_share
+        self._opp_models = {}       # path -> 已加载 PPO (每进程一次)
+        self._opp_model = None      # 本局对手 (None = Laika)
+        self._opp_rng = np.random.default_rng(seed + 777)
         if dodge_drill and not obs_traj:
             raise ValueError("闪避特训依赖弹道预演观测 (obs_traj=True)")
         self.game = None
@@ -231,7 +265,8 @@ class TankTroubleGym(gym.Env):
 
         self.action_space = spaces.MultiDiscrete([3, 3, 2])
         self.observation_space = spaces.Box(
-            low=-4.0, high=4.0, shape=(obs_dim(obs_traj),), dtype=np.float32)
+            low=-4.0, high=4.0,
+            shape=(obs_dim(obs_traj, obs_kin, obs_mind),), dtype=np.float32)
 
     # ------------------------------------------------ 核心流程
 
@@ -239,14 +274,27 @@ class TankTroubleGym(gym.Env):
         super().reset(seed=seed)
         if seed is not None:
             self._base_seed = seed
+        # 自博弈: 本局对手 = Laika (laika_share) 或池中冻结策略
+        self._opp_model = None
+        use_laika = (not self._opponent_pool
+                     or self._opp_rng.random() < self._laika_share)
+        if not use_laika:
+            path = self._opponent_pool[
+                int(self._opp_rng.integers(len(self._opponent_pool)))]
+            if path not in self._opp_models:
+                from stable_baselines3 import PPO
+                self._opp_models[path] = PPO.load(path, device="cpu")
+            self._opp_model = self._opp_models[path]
         for _ in range(20):   # 去偏最多重掷 20 次, 掷不出就用最后一局
             ep_seed = self._base_seed * 1_000_003 + self._episode
             self._episode += 1
-            self.game = Game(seed=ep_seed, ai_enabled=True)
+            self.game = Game(seed=ep_seed, ai_enabled=use_laika)
             if (self._min_spawn_cells <= 0
                     or self._spawn_path_cells() >= self._min_spawn_cells):
                 break
         self._build_wall_boxes()
+        self._prev_pos = {0: (self.game.tanks[0].x, self.game.tanks[0].y),
+                          1: (self.game.tanks[1].x, self.game.tanks[1].y)}
         self._frames = 0
         self._first_destroy = None   # 首个被摧毁的坦克号 (0/1/"both")
         self._prev_phi = self._phi()
@@ -268,6 +316,21 @@ class TankTroubleGym(gym.Env):
         t0.fire = fire == 1
         if self._dodge_drill:
             t0.fire = False        # 特训营缴械: 唯一课题是活下来
+
+        # 自博弈对手: 冻结策略以 tank1 视角决策 (与我方同频)
+        if self._opp_model is not None and g.tanks[1].alive:
+            opp_a, _ = self._opp_model.predict(self._obs(me_idx=1),
+                                               deterministic=False)
+            t1 = g.tanks[1]
+            t1.forward = int(opp_a[0]) == 2
+            t1.backup = int(opp_a[0]) == 0
+            t1.turn_left = int(opp_a[1]) == 0
+            t1.turn_right = int(opp_a[1]) == 2
+            t1.fire = int(opp_a[2]) == 1
+
+        # 运动学特征基准: 本步开始时双方位置 (对手决策用的是上一步的位移)
+        self._prev_pos[0] = (g.tanks[0].x, g.tanks[0].y)
+        self._prev_pos[1] = (g.tanks[1].x, g.tanks[1].y)
 
         reward = 0.0
         terminated = False
@@ -515,10 +578,10 @@ class TankTroubleGym(gym.Env):
 
     # ------------------------------------------------ 观测
 
-    def _obs(self):
+    def _obs(self, me_idx: int = 0):
         g = self.game
-        me = g.tanks[0]
-        en = g.tanks[1]
+        me = g.tanks[me_idx]
+        en = g.tanks[1 - me_idx]
         scale = g.scale
         w = len(g.maze) * scale
         h = len(g.maze[0]) * scale
@@ -533,7 +596,7 @@ class TankTroubleGym(gym.Env):
             ly = -dx * sin_f + dy * cos_f
             return lx, ly
 
-        obs = np.zeros(obs_dim(self._obs_traj), dtype=np.float32)
+        obs = np.zeros(obs_dim(self._obs_traj, self._obs_kin, self._obs_mind), dtype=np.float32)
         i = 0
         # ---- 自车 6 ----
         obs[i:i + 6] = [
@@ -645,6 +708,100 @@ class TankTroubleGym(gym.Env):
                     obs[base + 0] = 1.0
                     obs[base + 1] = 1.0 - min(t_min / SHOT_SIM_FRAMES, 1.0)
                     obs[base + 2] = 1.0 - bounces / 2.0   # 直射=1
+        if not self._obs_kin:
+            return obs
+
+        # ================ v3 运动学与导航 (7 维) ================
+        k0 = OBS_DIM + TRAJ_DIM
+        # 自身速度 (自我中心, 上一决策步位移; 满速前进约 0.32 格/步)
+        pv = self._prev_pos.get(me_idx)
+        if pv is not None:
+            mvx, mvy = to_local(me.x - pv[0], me.y - pv[1])
+            obs[k0] = np.clip(mvx / scale / 0.4, -1.0, 1.0)
+            obs[k0 + 1] = np.clip(mvy / scale / 0.4, -1.0, 1.0)
+        # 自身卡墙 (上一帧墙碰撞回滚发生过)
+        obs[k0 + 2] = 1.0 if me.hit_something else 0.0
+        # 敌方速度 (预判其躲闪方向; 屏幕可见的公平信息)
+        pe = self._prev_pos.get(1 - me_idx)
+        if pe is not None:
+            evx, evy = to_local(en.x - pe[0], en.y - pe[1])
+            obs[k0 + 3] = np.clip(evx / scale / 0.4, -1.0, 1.0)
+            obs[k0 + 4] = np.clip(evy / scale / 0.4, -1.0, 1.0)
+        # 最短路下一格方位 (无视线时的指路牌; 有视线直接指向敌人)
+        tx_w, ty_w = en.x, en.y
+        if not los:
+            fx_c, fy_c = int(me.x // scale), int(me.y // scale)
+            dm = g.dist_map(fx_c, fy_c)
+            ef = g.tank_fields[en.number]
+            if dm is not None:
+                try:
+                    path = get_shortest_path_with_distances(
+                        g.maze, dm, fx_c, fy_c, ef["x"], ef["y"])
+                except Exception:
+                    path = None
+                if path:
+                    cell = path[0]
+                    # 已在同格心附近则取下一格
+                    cx = (cell["x"] + 0.5) * scale
+                    cy = (cell["y"] + 0.5) * scale
+                    if (math.hypot(cx - me.x, cy - me.y) < scale * 0.3
+                            and len(path) > 1):
+                        cell = path[1]
+                        cx = (cell["x"] + 0.5) * scale
+                        cy = (cell["y"] + 0.5) * scale
+                    tx_w, ty_w = cx, cy
+        bx, by = to_local(tx_w - me.x, ty_w - me.y)
+        bd = math.hypot(bx, by)
+        if bd > 1e-9:
+            obs[k0 + 5] = bx / bd
+            obs[k0 + 6] = by / bd
+        if not self._obs_mind:
+            return obs
+
+        # ================ 读心 (12 维, 白盒作弊) ================
+        # 只读对手 (en) 的 AI 内心; en 无 AI (自博弈对手) 时全 0。
+        m0 = OBS_DIM + TRAJ_DIM + KIN_DIM
+        ai = getattr(en, "ai", None)
+        if ai is not None:
+            goal = ai.my_goal.get("goal", "idle")
+            # 目标类别 4 组 (比 7 路 one-hot 更稳): 躲弹/瞄准/逃跑/驱车
+            obs[m0 + 0] = 1.0 if goal == "dodgeBullet" else 0.0
+            obs[m0 + 1] = 1.0 if goal in ("shootAfter", "idle") else 0.0
+            obs[m0 + 2] = 1.0 if goal in ("backAway", "runAway") else 0.0
+            obs[m0 + 3] = 1.0 if goal in ("driveTo", "goForCrate") else 0.0
+            # 目标坐标 (它的战略目的地) -> 自我中心方位
+            gx, gy = ai.my_goal.get("x"), ai.my_goal.get("y")
+            if gx is not None and gy is not None:
+                lx, ly = to_local(gx * scale + scale / 2 - en.x,
+                                  gy * scale + scale / 2 - en.y)
+                gd = math.hypot(lx, ly)
+                if gd > 1e-9:
+                    obs[m0 + 4] = lx / gd
+                    obs[m0 + 5] = ly / gd
+            # 动作栈顶: 它已承诺的下一步 (最致命的预知)
+            act = ai.my_actions[-1] if ai.my_actions else None
+            if act is not None:
+                a = act.get("action", "")
+                # 站定挨打信号: 转向/开火/发呆时它几乎不动
+                obs[m0 + 6] = 1.0 if a in ("turnTo", "fireWeapon", "idle") else 0.0
+                # 开火预告: 栈顶是 fireWeapon
+                obs[m0 + 7] = 1.0 if a == "fireWeapon" else 0.0
+                # 它要去的精确点 (driveToPos 世界坐标 / driveToField 格坐标)
+                ax, ay = act.get("x"), act.get("y")
+                if ax is not None and ay is not None:
+                    if a == "driveToField":
+                        wx = ax * scale + scale / 2
+                        wy = ay * scale + scale / 2
+                    else:
+                        wx, wy = ax, ay
+                    lx, ly = to_local(wx - en.x, wy - en.y)
+                    ad = math.hypot(lx, ly)
+                    obs[m0 + 8] = np.clip(ad / scale / 8.0, 0.0, 1.0)
+                    if ad > 1e-9:
+                        obs[m0 + 9] = lx / ad
+                        obs[m0 + 10] = ly / ad
+            # 目标优先级 (它有多"坚定"; 高优先级=不易被打断)
+            obs[m0 + 11] = np.clip(ai.my_goal.get("priority", 0.0), 0.0, 1.0)
         return obs
 
 
@@ -652,6 +809,8 @@ def make_env(rank: int, base_seed: int = 0, reward_version: int = 2,
              obs_traj: bool = False, min_spawn_cells: int = 0,
              dd_reward: float = R_DOUBLE_DEATH, frame_skip: int = FRAME_SKIP,
              bad_shot: float = R_BAD_SHOT, time_escalate: bool = False,
+             opponent_pool: tuple = (), laika_share: float = 0.5,
+             obs_kin: bool = False, obs_mind: bool = False,
              waste_shot: float = R_WASTE_SHOT, near_miss: float = NEAR_MISS_BONUS,
              dodge_drill: bool = False):
     """SubprocVecEnv 工厂 (需模块级可 pickle)"""
@@ -666,5 +825,8 @@ def make_env(rank: int, base_seed: int = 0, reward_version: int = 2,
                               time_escalate=time_escalate,
                               waste_shot=waste_shot,
                               near_miss=near_miss,
-                              dodge_drill=dodge_drill)
+                              dodge_drill=dodge_drill,
+                              opponent_pool=opponent_pool,
+                              laika_share=laika_share,
+                              obs_kin=obs_kin, obs_mind=obs_mind)
     return _init

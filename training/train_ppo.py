@@ -27,13 +27,42 @@ MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 TB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tb_logs")
 
 
+class ValueWarmupCallback(BaseCallback):
+    """BC 热启动的价值头是随机初始化的, 冷启动的坏 advantage 会先毁掉
+    克隆好的策略。前 warmup_steps 冻结策略侧参数, 只训价值头。"""
+
+    def __init__(self, warmup_steps):
+        super().__init__()
+        self.warmup_steps = warmup_steps
+        self._frozen = False
+
+    def _set_policy_grad(self, enabled: bool):
+        for name, p in self.model.policy.named_parameters():
+            if "value" not in name:
+                p.requires_grad = enabled
+
+    def _on_training_start(self):
+        if self.warmup_steps > 0:
+            self._set_policy_grad(False)
+            self._frozen = True
+            print(f"[价值预热] 冻结策略侧 {self.warmup_steps:,} 步", flush=True)
+
+    def _on_step(self) -> bool:
+        if self._frozen and self.num_timesteps >= self.warmup_steps:
+            self._set_policy_grad(True)
+            self._frozen = False
+            print(f"[价值预热] 完成 @ {self.num_timesteps:,} 步, 策略侧解冻",
+                  flush=True)
+        return True
+
+
 class WinRateCallback(BaseCallback):
     """每 rollout 统计训练局的胜/负/平, 写入 TensorBoard;
     定期做确定性评估并保存最优模型。"""
 
     def __init__(self, eval_every_steps=500_000, eval_rounds=100,
                  reward_version=2, obs_traj=False, frame_skip=2,
-                 dodge_drill=False):
+                 dodge_drill=False, obs_kin=False, obs_mind=False):
         super().__init__()
         self.results = []
         self.eval_every = eval_every_steps
@@ -42,6 +71,8 @@ class WinRateCallback(BaseCallback):
         self.obs_traj = obs_traj
         self.frame_skip = frame_skip
         self.dodge_drill = dodge_drill         # 特训营: 指标 = 存活率(draw)
+        self.obs_kin = obs_kin
+        self.obs_mind = obs_mind
         self._next_eval = eval_every_steps
         self.best_win_rate = -1.0
 
@@ -77,7 +108,8 @@ class WinRateCallback(BaseCallback):
     def _deterministic_eval(self):
         env = TankTroubleGym(seed=880000, reward_version=self.reward_version,
                              obs_traj=self.obs_traj, frame_skip=self.frame_skip,
-                             dodge_drill=self.dodge_drill)
+                             dodge_drill=self.dodge_drill, obs_kin=self.obs_kin,
+                             obs_mind=self.obs_mind)
         # 特训营的成功指标 = 活满一局(draw); 常规训练 = 击杀获胜(win)
         target = "draw" if self.dodge_drill else "win"
         wins = 0
@@ -107,6 +139,10 @@ def main():
                          "4 真规则(原版计分终局); 5 v4+密集闪避压力(需 --obs-traj)")
     ap.add_argument("--obs-traj", action="store_true",
                     help="附加弹道预演观测 (76 -> 121 维)")
+    ap.add_argument("--obs-kin", action="store_true",
+                    help="附加运动学/导航观测 (121 -> 128 维, 需 --obs-traj)")
+    ap.add_argument("--obs-mind", action="store_true",
+                    help="读心观测 (白盒作弊, +12 维, 直读 Laika 意图, 需 --obs-traj)")
     ap.add_argument("--min-spawn-dist", type=int, default=0,
                     help="训练去偏: 重掷出生路径距离小于该格数的局 (评估不受影响)")
     ap.add_argument("--dd-penalty", type=float, default=-0.2,
@@ -117,6 +153,12 @@ def main():
                     help="每决策重复帧数 (1 = 每帧决策, 10° 瞄准粒度)")
     ap.add_argument("--bad-shot", type=float, default=-0.15,
                     help="开火时模拟为 SUICIDE 的即时惩罚 (自伤纪律)")
+    ap.add_argument("--value-warmup", type=int, default=0,
+                    help="BC 热启动用: 前 N 步冻结策略只训价值头")
+    ap.add_argument("--opponent-pool", type=str, default="",
+                    help="自博弈对手池: 冻结策略 zip 路径, 逗号分隔")
+    ap.add_argument("--laika-share", type=float, default=0.5,
+                    help="对手池模式下仍用 Laika 的每局概率 (防内战漂移)")
     ap.add_argument("--time-escalate", action="store_true",
                     help="时间惩罚随局长递增 (压拖长局)")
     ap.add_argument("--waste-shot", type=float, default=-0.02,
@@ -125,6 +167,8 @@ def main():
                     help="擦身弹奖励 (P13 收紧防泼弹)")
     ap.add_argument("--dodge-drill", action="store_true",
                     help="闪避特训营: 禁用开火, 只练走位活命 (需 --obs-traj)")
+    ap.add_argument("--net-width", type=int, default=256,
+                    help="MLP 宽度 (从零训练时生效; 121 维观测可能受 256 瓶颈)")
     ap.add_argument("--tag", default="v2", help="TensorBoard 运行名前缀")
     args = ap.parse_args()
 
@@ -136,6 +180,9 @@ def main():
                  obs_traj=args.obs_traj, min_spawn_cells=args.min_spawn_dist,
                  dd_reward=args.dd_penalty, frame_skip=args.frame_skip,
                  bad_shot=args.bad_shot, time_escalate=args.time_escalate,
+                 opponent_pool=tuple(s.strip() for s in args.opponent_pool.split(",") if s.strip()),
+                 laika_share=args.laika_share, obs_kin=args.obs_kin,
+                 obs_mind=args.obs_mind,
                  waste_shot=args.waste_shot, near_miss=args.near_miss,
                  dodge_drill=args.dodge_drill)
         for i in range(args.envs)])
@@ -167,17 +214,19 @@ def main():
             clip_range=0.2,
             ent_coef=0.01,
             vf_coef=0.5,
-            policy_kwargs=dict(net_arch=[256, 256]),
+            policy_kwargs=dict(net_arch=[args.net_width, args.net_width]),
             tensorboard_log=TB_DIR,
             device="cpu",              # MLP 小网络, CPU 快于 GPU 搬运
             verbose=1,
         )
 
     callbacks = [
+        *([ValueWarmupCallback(args.value_warmup)] if args.value_warmup else []),
         WinRateCallback(eval_every_steps=500_000, eval_rounds=100,
                         reward_version=args.reward_version,
                         obs_traj=args.obs_traj, frame_skip=args.frame_skip,
-                        dodge_drill=args.dodge_drill),
+                        dodge_drill=args.dodge_drill, obs_kin=args.obs_kin,
+                        obs_mind=args.obs_mind),
         CheckpointCallback(save_freq=max(1_000_000 // args.envs, 1),
                            save_path=MODELS_DIR,
                            name_prefix="ppo_tt"),
