@@ -67,7 +67,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--policy", default="hunter",
                     choices=["idle", "random", "hunter", "model",
-                             "hybrid", "mpc"])
+                             "hybrid", "mpc", "scorenet"])
     ap.add_argument("--model", default="training/models/best_model.zip")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--k", type=int, default=5,
@@ -89,6 +89,11 @@ def main():
         from training.mpc_agent import MPCPolicy
         policy = MPCPolicy("L2", horizon=48, hold=16, n_samples=1)
         policy.name = "mpc"
+    elif args.policy == "scorenet":
+        from training.score_distill import ScoreNetPolicy
+        policy = ScoreNetPolicy(
+            "training/models/p21b_scorenet.pt")
+        policy.name = "scorenet"
     else:
         import gymnasium as _g
         from stable_baselines3 import PPO
