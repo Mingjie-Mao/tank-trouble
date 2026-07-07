@@ -69,6 +69,9 @@ def main():
                     choices=["idle", "random", "hunter", "model",
                              "hybrid", "mpc", "scorenet"])
     ap.add_argument("--model", default="training/models/best_model.zip")
+    ap.add_argument("--net", default=None,
+                    help="scorenet 权重路径 (默认: scorenet_best 现任冠军, "
+                         "无则回退 p21b_scorenet)")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--k", type=int, default=5,
                     help="混合体候选数 (越大越强越慢)")
@@ -91,9 +94,13 @@ def main():
         policy.name = "mpc"
     elif args.policy == "scorenet":
         from training.score_distill import ScoreNetPolicy
-        policy = ScoreNetPolicy(
-            "training/models/p21b_scorenet.pt")
-        policy.name = "scorenet"
+        net_path = args.net
+        if net_path is None:
+            best = "training/models/scorenet_best.pt"
+            net_path = best if os.path.exists(best) else \
+                "training/models/p21b_scorenet.pt"
+        policy = ScoreNetPolicy(net_path)
+        policy.name = f"scorenet ({os.path.basename(net_path)})"
     else:
         import gymnasium as _g
         from stable_baselines3 import PPO
