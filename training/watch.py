@@ -66,9 +66,12 @@ def policy_name(p):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--policy", default="hunter",
-                    choices=["idle", "random", "hunter", "model"])
+                    choices=["idle", "random", "hunter", "model",
+                             "hybrid", "mpc"])
     ap.add_argument("--model", default="training/models/best_model.zip")
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--k", type=int, default=5,
+                    help="混合体候选数 (越大越强越慢)")
     args = ap.parse_args()
 
     model = model_env = None
@@ -78,13 +81,28 @@ def main():
         policy = RandomPolicy(seed=1)
     elif args.policy == "hunter":
         policy = HunterPolicy()
+    elif args.policy == "hybrid":
+        from training.hybrid_agent import HybridPolicy
+        policy = HybridPolicy(k=args.k)
+        policy.name = "hybrid"
+    elif args.policy == "mpc":
+        from training.mpc_agent import MPCPolicy
+        policy = MPCPolicy("L2", horizon=48, hold=16, n_samples=1)
+        policy.name = "mpc"
     else:
+        import gymnasium as _g
         from stable_baselines3 import PPO
-        from training.tt_gym_env import TankTroubleGym, OBS_DIM
+        from training.tt_gym_env import TankTroubleGym, obs_dim
         model = PPO.load(args.model, device="cpu")
-        # 与 evaluate.ModelPolicy 一致: 按模型观测维度自动识别弹道预演观测
-        traj = model.observation_space.shape[0] != OBS_DIM
-        model_env = TankTroubleGym(seed=0, obs_traj=traj)
+        # 与 evaluate.ModelPolicy 一致: 按模型观测空间自动识别观测版本
+        space = model.observation_space
+        obs_map = isinstance(space, _g.spaces.Dict)
+        dim = (space["vec"] if obs_map else space).shape[0]
+        traj, nav = next(
+            (t, v) for t in (True, False) for v in (True, False)
+            if obs_dim(t, v) == dim)
+        model_env = TankTroubleGym(seed=0, obs_traj=traj, obs_nav=nav,
+                                   obs_map=obs_map)
         policy = IdlePolicy()   # 占位, 实际由 model 控制
         policy.name = "model"
 

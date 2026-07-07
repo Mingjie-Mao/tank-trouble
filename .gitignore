@@ -10,3 +10,4 @@ training/tb_logs/
 
 # 原始 Flash 素材 (二进制, 反编译源码见 swf_decompiled/)
 tank-trouble_flash/
+training/distill_data/

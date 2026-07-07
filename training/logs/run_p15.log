@@ -1,0 +1,122 @@
+===== [P15-BC] 采集 80 万样本 + 克隆训练 12 epochs =====
+===== [P15-1] 采集 Laika 示范 800000 样本 =====
+  采集 52401/800000 (500 局, 28s)
+  采集 101289/800000 (1000 局, 55s)
+  采集 151594/800000 (1500 局, 83s)
+  采集 204522/800000 (2000 局, 111s)
+  采集 254893/800000 (2500 局, 139s)
+  采集 305770/800000 (3000 局, 167s)
+  采集 353611/800000 (3500 局, 193s)
+  采集 402887/800000 (4000 局, 220s)
+  采集 454917/800000 (4500 局, 249s)
+  采集 506322/800000 (5000 局, 276s)
+  采集 557907/800000 (5500 局, 305s)
+  采集 608130/800000 (6000 局, 332s)
+  采集 658653/800000 (6500 局, 360s)
+  采集 711626/800000 (7000 局, 389s)
+  采集 764250/800000 (7500 局, 419s)
+采集完成: 800000 样本, 7855 局, 438s
+  油门分布: [0.021 0.652 0.327]
+  转向分布: [0.233 0.539 0.228]
+  开火分布: [0.937 0.063]
+===== [P15-2] 行为克隆训练 (12 epochs) =====
+  epoch 1/12  loss 1.9036  验证准确率 油门 72.2% 转向 54.8% 开火 95.3%  1s
+  epoch 2/12  loss 1.6341  验证准确率 油门 73.1% 转向 57.4% 开火 96.1%  2s
+  epoch 3/12  loss 1.5869  验证准确率 油门 73.5% 转向 58.6% 开火 96.1%  4s
+  epoch 4/12  loss 1.5618  验证准确率 油门 74.1% 转向 59.3% 开火 96.1%  5s
+  epoch 5/12  loss 1.5387  验证准确率 油门 74.6% 转向 59.8% 开火 96.1%  6s
+  epoch 6/12  loss 1.5185  验证准确率 油门 74.8% 转向 60.0% 开火 96.1%  7s
+  epoch 7/12  loss 1.5004  验证准确率 油门 75.1% 转向 60.4% 开火 96.2%  8s
+  epoch 8/12  loss 1.4837  验证准确率 油门 75.5% 转向 61.0% 开火 96.3%  10s
+  epoch 9/12  loss 1.4684  验证准确率 油门 75.8% 转向 61.3% 开火 96.3%  11s
+  epoch 10/12  loss 1.4552  验证准确率 油门 76.3% 转向 61.8% 开火 96.3%  12s
+  epoch 11/12  loss 1.4436  验证准确率 油门 76.4% 转向 61.9% 开火 96.4%  13s
+  epoch 12/12  loss 1.4340  验证准确率 油门 76.6% 转向 62.3% 开火 96.5%  14s
+===== [P15-3] 克隆已保存 /Users/cichlidfish/tank_trouble/training/models/p15_bc_clone.zip =====
+===== [定级] BC 克隆裸装上阵 (1000 局 @970000, 天花板=镜像 40.2%) =====
+  [100/1000] 先杀率 7.0%  真胜率 6.0%  6s
+  [200/1000] 先杀率 8.5%  真胜率 7.5%  13s
+  [300/1000] 先杀率 8.3%  真胜率 7.3%  19s
+  [400/1000] 先杀率 8.0%  真胜率 7.0%  27s
+  [500/1000] 先杀率 8.8%  真胜率 7.4%  35s
+  [600/1000] 先杀率 9.7%  真胜率 7.3%  41s
+  [700/1000] 先杀率 9.6%  真胜率 7.3%  47s
+  [800/1000] 先杀率 9.8%  真胜率 7.6%  54s
+  [900/1000] 先杀率 10.6%  真胜率 8.1%  60s
+  [1000/1000] 先杀率 10.5%  真胜率 8.1%  68s
+
+===== model 双口径评估 (1000 局, 68s) =====
+  先杀率(destroy口径): 10.5%   [同帧双杀 0.1%]
+  真胜率(原版计分):    8.1%   ← 口径差 +2.4%
+  真负率 83.6%  双亡率 8.1%  超时平局 0.2%
+  自杀率(死于自己子弹): 0.4%
+  场均开火 0.1 发  命中率 46.4%  零开火局 94%
+  场均移动 0.8 格  平均局长 10.9 秒
+  死因分布(917次死亡): Laika直射 37%  Laika反弹弹 63%  自己子弹 0%  未知 0%
+  击杀方式(26次击杀): 直射 73%  反弹 23%  未知 4%
+===== [P15-FT] 价值预热 50 万步 + 联合微调 3M (lr 1e-4, ent 0.003) =====
+奖励版本: v5   并行环境: 12   弹道预演观测: 开   出生去偏: 4 格   双亡奖励: -0.2   空枪/擦弹: -0.02/0.075   特训营: 关
+从 training/models/p15_bc_clone.zip 继续训练 (覆盖 {'learning_rate': 0.0001, 'ent_coef': 0.003})
+[价值预热] 冻结 6 个策略参数张量, 先训价值头 500,000 步
+
+[eval @ 516,096 steps] 确定性评估胜率: 6.0%
+Traceback (most recent call last):
+  File "/Users/cichlidfish/tank_trouble/training/train_ppo.py", line 218, in <module>
+    main()
+    ~~~~^^
+  File "/Users/cichlidfish/tank_trouble/training/train_ppo.py", line 200, in main
+    model.learn(total_timesteps=args.value_warmup,
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                callback=callbacks, progress_bar=True)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/site-packages/stable_baselines3/ppo/ppo.py", line 311, in learn
+    return super().learn(
+           ~~~~~~~~~~~~~^
+        total_timesteps=total_timesteps,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        progress_bar=progress_bar,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/anaconda3/lib/python3.13/site-packages/stable_baselines3/common/on_policy_algorithm.py", line 324, in learn
+    continue_training = self.collect_rollouts(self.env, callback, self.rollout_buffer, n_rollout_steps=self.n_steps)
+  File "/opt/anaconda3/lib/python3.13/site-packages/stable_baselines3/common/on_policy_algorithm.py", line 266, in collect_rollouts
+    callback.on_rollout_end()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/anaconda3/lib/python3.13/site-packages/stable_baselines3/common/callbacks.py", line 124, in on_rollout_end
+    self._on_rollout_end()
+    ~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/anaconda3/lib/python3.13/site-packages/stable_baselines3/common/callbacks.py", line 229, in _on_rollout_end
+    callback.on_rollout_end()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/anaconda3/lib/python3.13/site-packages/stable_baselines3/common/callbacks.py", line 124, in on_rollout_end
+    self._on_rollout_end()
+    ~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/anaconda3/lib/python3.13/site-packages/stable_baselines3/common/callbacks.py", line 229, in _on_rollout_end
+    callback.on_rollout_end()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/anaconda3/lib/python3.13/site-packages/stable_baselines3/common/callbacks.py", line 124, in on_rollout_end
+    self._on_rollout_end()
+    ~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/cichlidfish/tank_trouble/training/train_ppo.py", line 74, in _on_rollout_end
+    self.model.save(path)
+    ~~~~~~~~~~~~~~~^^^^^^
+  File "/opt/anaconda3/lib/python3.13/site-packages/stable_baselines3/common/base_class.py", line 867, in save
+    save_to_zip_file(path, data=data, params=params_to_save, pytorch_variables=pytorch_variables)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/site-packages/stable_baselines3/common/save_util.py", line 312, in save_to_zip_file
+    file = open_path(save_path, "w", verbose=0, suffix="zip")
+  File "/opt/anaconda3/lib/python3.13/functools.py", line 934, in wrapper
+    return dispatch(args[0].__class__)(*args, **kw)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/site-packages/stable_baselines3/common/save_util.py", line 240, in open_path_str
+    return open_path_pathlib(pathlib.Path(path), mode, verbose, suffix)
+  File "/opt/anaconda3/lib/python3.13/site-packages/stable_baselines3/common/save_util.py", line 279, in open_path_pathlib
+    return open_path(path.open("wb"), mode, verbose, suffix)
+                     ~~~~~~~~~^^^^^^
+  File "/opt/anaconda3/lib/python3.13/pathlib/_local.py", line 537, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: '/Users/cichlidfish/tank_trouble/training/models/best_model.zip'
+training/run_p15_bc.sh: line 19: 53315 Segmentation fault: 11  python3 training/train_ppo.py --steps 3000000 --envs 12 --reward-version 5 --obs-traj --min-spawn-dist 4 --bad-shot -0.45 --resume $M/p15_bc_clone.zip --value-warmup 500000 --lr 1e-4 --ent-coef 0.003 --tag p15_ft

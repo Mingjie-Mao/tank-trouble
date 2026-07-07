@@ -254,15 +254,25 @@ class ModelPolicy:
     name = "model"
 
     def __init__(self, model_path, frame_skip=2):
+        import gymnasium as _g
         from stable_baselines3 import PPO
-        from training.tt_gym_env import TankTroubleGym, OBS_DIM
+        from training.tt_gym_env import TankTroubleGym, obs_dim
         self.model = PPO.load(model_path, device="cpu")
-        # 按模型输入维度自动匹配观测版本 (76 基础 / 121 弹道预演)
-        traj = self.model.observation_space.shape[0] != OBS_DIM
+        # 按模型输入空间自动匹配观测版本:
+        # Dict = 含地图头; 向量维度 76 基础 / 121 +弹道 / 125 +弹道+导航
+        space = self.model.observation_space
+        obs_map = isinstance(space, _g.spaces.Dict)
+        dim = (space["vec"] if obs_map else space).shape[0]
+        traj, nav = next(
+            (t, v) for t in (True, False) for v in (True, False)
+            if obs_dim(t, v) == dim)
         self.frame_skip = frame_skip
-        self.env = TankTroubleGym(seed=0, obs_traj=traj, frame_skip=frame_skip)
+        self.env = TankTroubleGym(seed=0, obs_traj=traj, obs_nav=nav,
+                                  obs_map=obs_map, frame_skip=frame_skip)
         self.score_env = TankTroubleGym(seed=0, terminal_mode="score",
-                                        obs_traj=traj, frame_skip=frame_skip)
+                                        obs_traj=traj, obs_nav=nav,
+                                        obs_map=obs_map,
+                                        frame_skip=frame_skip)
 
     def reset(self):
         pass

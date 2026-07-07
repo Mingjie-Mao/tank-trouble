@@ -44,8 +44,18 @@ SHOT_SIM_FRAMES = 75      # 假想炮弹前瞻 3 秒
 HIT_RADIUS_SCALE = 0.25   # 命中判定半径 (格), 近似坦克有效尺寸
 
 
-def obs_dim(obs_traj: bool) -> int:
-    return OBS_DIM + (TRAJ_DIM if obs_traj else 0)
+# ---- 导航观测 (obs_nav=True 时附加; 治"知道多远不知道往哪走") ----
+# 4 维: 通往敌人的最短路下一步方向 + 下下步方向 (自车系单位向量)。
+# 用引擎现成的 distancesForMaze 梯度下降取邻格, 每步 O(4) 查表。
+NAV_DIM = 4
+
+# ---- 地图栅格观测 (obs_map=True 时观测变为 Dict{vec, map}; P18 CNN头) ----
+# 通道: 0=下墙 1=左墙 (padding 全 1 = 实心) 2=自车格 3=敌车格
+MAP_C, MAP_H, MAP_W = 4, 10, 12   # 迷宫最大 12 宽 x 10 高
+
+
+def obs_dim(obs_traj: bool, obs_nav: bool = False) -> int:
+    return OBS_DIM + (TRAJ_DIM if obs_traj else 0) + (NAV_DIM if obs_nav else 0)
 
 
 def _reflective_closest_batch(origins, dirs, speeds, horizons,
@@ -190,7 +200,10 @@ class TankTroubleGym(gym.Env):
                  time_escalate: bool = False,
                  waste_shot: float = R_WASTE_SHOT,
                  near_miss: float = NEAR_MISS_BONUS,
-                 dodge_drill: bool = False):
+                 dodge_drill: bool = False,
+                 stuck_penalty: float = 0.0,
+                 obs_nav: bool = False,
+                 obs_map: bool = False):
         """terminal_mode:
         - "destroy": 首个 destroy 事件立即终局 (训练默认, 先杀即判胜)
         - "score":   跑到原版计分点 endCount==50 (round_end 事件), 先杀后死
@@ -219,6 +232,9 @@ class TankTroubleGym(gym.Env):
         self._waste_shot = waste_shot
         self._near_miss = near_miss
         self._dodge_drill = dodge_drill
+        self._stuck_penalty = stuck_penalty
+        self._obs_nav = obs_nav
+        self._obs_map = obs_map
         if dodge_drill and not obs_traj:
             raise ValueError("闪避特训依赖弹道预演观测 (obs_traj=True)")
         self.game = None
@@ -230,8 +246,18 @@ class TankTroubleGym(gym.Env):
         self._prev_phi = 0.0
 
         self.action_space = spaces.MultiDiscrete([3, 3, 2])
-        self.observation_space = spaces.Box(
-            low=-4.0, high=4.0, shape=(obs_dim(obs_traj),), dtype=np.float32)
+        vec_space = spaces.Box(
+            low=-4.0, high=4.0, shape=(obs_dim(obs_traj, obs_nav),),
+            dtype=np.float32)
+        if obs_map:
+            self.observation_space = spaces.Dict({
+                "vec": vec_space,
+                "map": spaces.Box(low=0.0, high=1.0,
+                                  shape=(MAP_C, MAP_H, MAP_W),
+                                  dtype=np.float32),
+            })
+        else:
+            self.observation_space = vec_space
 
     # ------------------------------------------------ 核心流程
 
@@ -357,12 +383,16 @@ class TankTroubleGym(gym.Env):
                     reward += R_TIME_PENALTY * 2.0 * (self._frames / TRUNCATE_FRAMES + 0.25)
                 else:
                     reward += R_TIME_PENALTY
+            # 卡墙惩罚 (P16): 顶着墙推 = 白送静止窗口, 教它松油门转向脱困
+            if self._stuck_penalty and t0.hit_something:
+                reward += self._stuck_penalty
 
         obs = self._obs()
         # v5: 闪避压力 — 站在预演命中弹道上, 按紧迫度逐步扣分
         # 特训营: 无论奖励版本都启用, 且加倍 (身法是唯一课题)
         if (self._rv >= 5 or self._dodge_drill) and not terminated:
-            block = obs[OBS_DIM:OBS_DIM + N_BULLET_SLOTS * TRAJ_BULLET_FEATS]
+            vec = obs["vec"] if self._obs_map else obs
+            block = vec[OBS_DIM:OBS_DIM + N_BULLET_SLOTS * TRAJ_BULLET_FEATS]
             block = block.reshape(N_BULLET_SLOTS, TRAJ_BULLET_FEATS)
             threat = float((block[:, 2] * (1.0 - block[:, 1])).max())
             mult = DRILL_PRESSURE_MULT if self._dodge_drill else 1.0
@@ -533,7 +563,8 @@ class TankTroubleGym(gym.Env):
             ly = -dx * sin_f + dy * cos_f
             return lx, ly
 
-        obs = np.zeros(obs_dim(self._obs_traj), dtype=np.float32)
+        obs = np.zeros(obs_dim(self._obs_traj, self._obs_nav),
+                       dtype=np.float32)
         i = 0
         # ---- 自车 6 ----
         obs[i:i + 6] = [
@@ -589,6 +620,8 @@ class TankTroubleGym(gym.Env):
         obs[i] = self._frames / TRUNCATE_FRAMES
         obs[i + 1] = 1.0 if me.trigger_released else 0.0
         if not self._obs_traj:
+            if self._obs_nav:
+                obs[-NAV_DIM:] = self._nav_features(to_local)
             return obs
         i += 2
 
@@ -645,7 +678,102 @@ class TankTroubleGym(gym.Env):
                     obs[base + 0] = 1.0
                     obs[base + 1] = 1.0 - min(t_min / SHOT_SIM_FRAMES, 1.0)
                     obs[base + 2] = 1.0 - bounces / 2.0   # 直射=1
+        if self._obs_nav:
+            obs[-NAV_DIM:] = self._nav_features(to_local)
+        if self._obs_map:
+            return {"vec": obs, "map": self._map_obs()}
         return obs
+
+    def _map_obs(self):
+        """迷宫栅格 (P18 CNN 头): (4, 10, 12) float32。
+
+        通道 0/1 = 下墙/左墙 (padding 全 1 = 实心, 边界隐含在 padding 中),
+        通道 2/3 = 自车/敌车所在格 one-hot。
+        """
+        g = self.game
+        m = np.zeros((MAP_C, MAP_H, MAP_W), dtype=np.float32)
+        maze = g.maze
+        w, h = len(maze), len(maze[0])
+        m[0, :, :] = 1.0   # padding 默认实心
+        m[1, :, :] = 1.0
+        for x in range(min(w, MAP_W)):
+            col = maze[x]
+            for y in range(min(h, MAP_H)):
+                m[0, y, x] = float(col[y][1])   # 下墙
+                m[1, y, x] = float(col[y][2])   # 左墙
+        me = g.tank_fields[0]
+        en = g.tank_fields[1]
+        if 0 <= me["x"] < MAP_W and 0 <= me["y"] < MAP_H:
+            m[2, me["y"], me["x"]] = 1.0
+        if 0 <= en["x"] < MAP_W and 0 <= en["y"] < MAP_H:
+            m[3, en["y"], en["x"]] = 1.0
+        return m
+
+    # ------------------------------------------------ 导航特征 (P17)
+
+    def _nav_features(self, to_local):
+        """通往敌人的最短路: 下一步/下下步方向 (自车系单位向量, 共 4 维)。
+
+        用敌人格出发的全图距离场做梯度下降 (与引擎/Laika 同一套语义),
+        每步只查 4 邻格。同格或不可达时直接指向敌人/置零。
+        """
+        from tank_trouble_original.maze import h_open, v_open
+        g = self.game
+        me_cell = g.tank_fields[0]
+        en_cell = g.tank_fields[1]
+        feats = np.zeros(NAV_DIM, dtype=np.float32)
+        dm = g.dist_map(en_cell["x"], en_cell["y"])   # 距敌距离场
+
+        def dval(x, y):
+            if dm is not None and 0 <= x < len(dm) and 0 <= y < len(dm[x]):
+                v = dm[x][y]
+                if v is not None and v == v:
+                    return v
+            return float("inf")
+
+        maze = g.maze
+        w, h = len(maze), len(maze[0])
+
+        def best_next(cx, cy):
+            """4 邻域中通行且距敌更近的格 (无更近则 None)"""
+            best, bd = None, dval(cx, cy)
+            if v_open(maze, cx, cy) and cx > 0 and dval(cx - 1, cy) < bd:
+                best, bd = (cx - 1, cy), dval(cx - 1, cy)
+            if (v_open(maze, cx + 1, cy) and cx < w - 1
+                    and dval(cx + 1, cy) < bd):
+                best, bd = (cx + 1, cy), dval(cx + 1, cy)
+            if (h_open(maze, cx, cy - 1) and cy > 0
+                    and dval(cx, cy - 1) < bd):
+                best, bd = (cx, cy - 1), dval(cx, cy - 1)
+            if (h_open(maze, cx, cy) and cy < h - 1
+                    and dval(cx, cy + 1) < bd):
+                best, bd = (cx, cy + 1), dval(cx, cy + 1)
+            return best
+
+        me_tank = g.tanks[0]
+        scale = g.scale
+        n1 = best_next(me_cell["x"], me_cell["y"])
+        if n1 is None:
+            # 同格/无下降方向: 直接指向敌人
+            dx = g.tanks[1].x - me_tank.x
+            dy = g.tanks[1].y - me_tank.y
+            d = math.hypot(dx, dy)
+            if d > 1e-9:
+                feats[0], feats[1] = to_local(dx / d, dy / d)
+            return feats
+        tx = (n1[0] + 0.5) * scale - me_tank.x
+        ty = (n1[1] + 0.5) * scale - me_tank.y
+        d = math.hypot(tx, ty)
+        if d > 1e-9:
+            feats[0], feats[1] = to_local(tx / d, ty / d)
+        n2 = best_next(n1[0], n1[1])
+        if n2 is not None:
+            tx2 = (n2[0] + 0.5) * scale - me_tank.x
+            ty2 = (n2[1] + 0.5) * scale - me_tank.y
+            d2 = math.hypot(tx2, ty2)
+            if d2 > 1e-9:
+                feats[2], feats[3] = to_local(tx2 / d2, ty2 / d2)
+        return feats
 
 
 def make_env(rank: int, base_seed: int = 0, reward_version: int = 2,
@@ -653,7 +781,8 @@ def make_env(rank: int, base_seed: int = 0, reward_version: int = 2,
              dd_reward: float = R_DOUBLE_DEATH, frame_skip: int = FRAME_SKIP,
              bad_shot: float = R_BAD_SHOT, time_escalate: bool = False,
              waste_shot: float = R_WASTE_SHOT, near_miss: float = NEAR_MISS_BONUS,
-             dodge_drill: bool = False):
+             dodge_drill: bool = False, stuck_penalty: float = 0.0,
+             obs_nav: bool = False, obs_map: bool = False):
     """SubprocVecEnv 工厂 (需模块级可 pickle)"""
     def _init():
         return TankTroubleGym(seed=base_seed + rank,
@@ -666,5 +795,8 @@ def make_env(rank: int, base_seed: int = 0, reward_version: int = 2,
                               time_escalate=time_escalate,
                               waste_shot=waste_shot,
                               near_miss=near_miss,
-                              dodge_drill=dodge_drill)
+                              dodge_drill=dodge_drill,
+                              stuck_penalty=stuck_penalty,
+                              obs_nav=obs_nav,
+                              obs_map=obs_map)
     return _init
