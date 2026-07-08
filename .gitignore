@@ -14,3 +14,6 @@ training/distill_data/
 training/models/*.pt
 training/score_data/
 training/value_data/
+
+# 本地会话恢复档 (个人对话记录, 勿公开)
+restored_session_*.md

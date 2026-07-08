@@ -2,7 +2,7 @@
 
 反编译 Flash 源码逐行移植的 Tank Trouble（vs Laika 模式），在其上完整走通
 「RL → 搜索 → 蒸馏」三条技术路线。游戏本体纯 Python 零依赖，无头 6000+ 帧/秒，
-种子完全可复现。项目叙事与教训见 **REPORT.md**，全部实验见 **training/EXPERIMENTS.md**。
+种子完全可复现。项目叙事与教训见 **docs/REPORT.md**，全部实验见 **training/EXPERIMENTS.md**。
 
 ## 当前进度（三路线成绩单）
 
@@ -10,15 +10,16 @@
 |---|---|---:|---:|---|
 | RL 训练 | P17 (BC+导航+PPO) | 36.4% | 0.3ms | 权重, 净胜 Laika |
 | 决策时搜索 | MPC / 混合体 K=12 | **96.0%** | 91/36ms | 现场推演, 上限测量仪 |
-| **搜索蒸馏** ★ | **P21b 评分网络** | **62.2 / 63.8**\* | **8.6ms** | **纯网络零搜索, 现任总冠军** |
+| **搜索蒸馏** ★ | **P22 专家迭代 iter02** | **68.6 / 64.8**\* | **8.6ms** | **纯网络零搜索, 现任总冠军** |
 
-\* 正式双基定级（1000 局@970000 / 500 局@990000），净胜 Laika 镜像线 22+ 点。
+\* 双基定级数字为 iter01（1000 局@970000 / 500 局@990000）；iter02 评测门
+68.2 vs 67.2 晋升冠军，官方定级被中断未补完。净胜 Laika 镜像线 25+ 点。
 参照：random 0.5% / 手写脚本 22.5% / Laika 镜像 40.2%。
-P21b 观测脚注：含物理预演特征（事实非价值，无候选比较）。
+观测脚注：含物理预演特征（事实非价值，无候选比较）。
 
 ```
-演进主线: 5%(random) → 35%(奖励工程到顶) → 36.4%(观测补全)
-          → 96%(MPC搜索击穿) → 62-64%(蒸馏回纯网络, 迭代第0轮, 双基已定级)
+演进主线: 5%(random) → 35%(奖励工程到顶) → 36.4%(观测补全) → 96%(MPC搜索击穿)
+          → 62-64%(P21b 蒸馏回纯网络) → ~68%(P22 专家迭代, +4/+1/平台见顶)
 ```
 
 ## 冠军网络架构（P21b 评分网络）
@@ -93,42 +94,47 @@ python3 training/train_ppo.py --steps 3000000 --envs 12 \
 | 奖励微调已饱和 | P8 后八连 NO-GO；行为矫正会破坏自平衡（P13/P14），改观测才涨分 |
 | ~~逼近镜像线后的天花板未知~~ | **已破解：MPC 搜索 96.0%**（无未来函数沙盒，18 动作×48 帧前推，零训练）——镜像线 40.2% 作废，游戏真实上限远高于此 |
 
-## 下一步（蒸馏 v1 已试，argmax 标签路线失败）
+## 当前战线（详见 training/EXPERIMENTS.md 台账）
 
-蒸馏三部曲已完成前两幕（详见 REPORT.md）：
-- P19 argmax 蒸馏失败（9%）→ 诊断出**并列陷阱**；P21a 评分蒸馏失败（14%）
-  → 诊断出**观测缺动作条件信息**
-- **P21b 全知观测（408 维）+ 评分回归 = 纯网络裸装 64.5%** ✅ 路径打通
-  （后悔值口径：93.6% 决策选中"够好动作"；残差 = 6.4% 致死误判、9% 双亡）
+- **P22 专家迭代已完成**：+4.0 / +1.0 / −1.5，纯 DAgger 在 ~68% 平台见顶
+  （一键：`bash training/scripts/run_expert_iter.sh 3 3000 60`）
+- **P23 价值叶子负结果**（93.5→87.5，泄漏 + on-policy 价值陷阱，已入档）
+- **免疫探针推翻观感**：老师主动击杀 96%，"老师不进攻"是错觉；
+  真问题 = 蒸馏鸿沟（老师 96% → 网络 64%）
+- **进行中 P24 生存模式**（`training/survival_mode.py`）：Laika 无敌、命中续命、
+  一发即死、评分=存活帧数，逼出主动狩猎。**铁律：生存模式只是训练课程，
+  验收永远在原版游戏**（防 reward hacking）
 
-**下一步（按优先级）**：
-1. 专家迭代（P22，代码就绪已冒烟验证）：学生自打回炉请 MPC 重标（DAgger），
-   靶向残差 → 75%+。一键：`bash training/scripts/run_expert_iter.sh 3 3000 60`
-   （轮数/每轮局数/进程数，进程数=核数-2；台账 `expert_iter.py history`）
-2. 算力放大：租多核 CPU 把每轮采集压到分钟级，冲 85-95%（采集/评测均已并行化）
-3. 特征自举：训感知网络替换手写预演前端（纯度赎回）
-4. 在线平台适配 V1-V3：视觉→影子状态重建（观测契约已兼容，限私房/本地）
+**后备方向**：算力放大（租多核 CPU）｜特征自举（感知网络替换手写前端）｜
+在线平台视觉栈 V1-V3
 
 ## 文件结构
 
 ```
-tank_trouble_original/   游戏本体 (1:1 移植, 勿改逻辑; 详见 PORT_NOTES.md)
+README.md                本文件 (总览)
 play_tank_trouble.py     本地游玩 | test_original_port.py 25 项验证
-swf_decompiled/          反编译源码 (移植依据, 行号引用见 PORT_NOTES)
+tank_trouble_original/   游戏本体 (1:1 移植, 勿改逻辑; 详见 docs/PORT_NOTES.md)
+swf_decompiled/          反编译源码 (移植依据, 行号引用见 docs/PORT_NOTES.md)
+docs/                    文档归档: REPORT(项目叙事) PAPER(论文骨架) PORT_NOTES(移植)
+                         GAME_MECHANICS_ANALYSIS(机制解读) HANDOFF/scorenet_arch.svg
 training/                # 核心 .py 固定在包根 (import 链与已存模型引用, 勿移)
-├── tt_gym_env.py        环境: 奖励 v1-v5, 观测 76/121/125/Dict(+地图)
-├── train_ppo.py         PPO (resume/价值预热/lr覆盖/各惩罚参数)
-├── bc_laika.py          行为克隆 | map_extractor.py CNN头 | mpc_distill.py 蒸馏采集
+├── tt_gym_env.py        环境: 奖励 v1-v5, 观测 76/121/125/408/Dict(+地图)
 ├── mpc_agent.py         B线: 无未来函数沙盒 + MPC 搜索 (96.0%)
 ├── hybrid_agent.py      B线: 网络剪枝混合体 (K=12: 96.0% @36ms 实时)
-├── evaluate.py          双口径评估 | baselines.py 基线 | watch.py 回放(含hybrid/mpc)
+├── score_distill.py     C线: 评分蒸馏 (P21b) | expert_iter.py 专家迭代 (P22)
+├── survival_mode.py     ★ P24 生存课程 (进行中) | value_leaf.py P23 (负结果存档)
+├── train_ppo.py         A线: PPO | bc_laika.py BC | map_extractor.py CNN头
+│                        | mpc_distill.py P19 —— A线已终结, 仅存档
+├── evaluate.py          双口径评估 | baselines.py 基线 | watch.py 回放(hybrid/mpc/网络)
 ├── EXPERIMENTS.md       ★ 全部实验台账
-├── analysis/ scripts/ logs/   挖掘工具 / 实验运行脚本 / 全部历史日志
-└── models/              模型 (gitignore, 线下传; best_model.zip=冠军P17)
+├── analysis/            挖掘工具
+├── scripts/             run_expert_iter.sh (现役) | archive/ 历史实验脚本
+├── logs/                全部历史日志 (实验证据, 入库)
+└── models/              模型 (gitignore, 线下传; scorenet_best.pt=现任冠军 iter02)
 ```
 
 ## 游戏机制速览
 
 25 FPS ｜ 迷宫每局随机 (4-12×4-10 格) ｜ 子弹每帧 7 子步、反弹、250 帧寿命、
 **可打死自己** ｜ 弹匣 5 发 ｜ 死亡后 125 帧才计分（双亡窗口）｜ Laika 为
-目标优先级脚本 AI（决策周期 10 帧，会躲一切子弹）。忠实度细节见 PORT_NOTES.md。
+目标优先级脚本 AI（决策周期 10 帧，会躲一切子弹）。忠实度细节见 docs/PORT_NOTES.md。
