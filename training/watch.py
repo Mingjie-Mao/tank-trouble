@@ -21,12 +21,15 @@ from training.baselines import IdlePolicy, RandomPolicy, HunterPolicy  # noqa: E
 class PolicyApp(App):
     """让策略接管 tank0 的渲染窗口 (R 键换局仍可用)"""
 
-    def __init__(self, policy, seed=None, model_env=None, model=None):
+    def __init__(self, policy, seed=None, model_env=None, model=None,
+                 self_harm_immune=None):
         self.policy = policy
         self.model_env = model_env    # ModelPolicy 用: 独立观测环境
         self.model = model
-        super().__init__(seed=seed, two_players=False)
-        self.root.title(f"Tank Trouble — {policy_name(policy)} vs Laika")
+        super().__init__(seed=seed, two_players=False,
+                         self_harm_immune=self_harm_immune)
+        tag = " [Laika免疫自伤]" if self_harm_immune else ""
+        self.root.title(f"Tank Trouble — {policy_name(policy)} vs Laika{tag}")
 
     def _tick(self):
         g = self.game
@@ -75,6 +78,8 @@ def main():
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--k", type=int, default=5,
                     help="混合体候选数 (越大越强越慢)")
+    ap.add_argument("--immune", action="store_true",
+                    help="对手(Laika)对自己的子弹免疫, 不再神风自杀")
     args = ap.parse_args()
 
     model = model_env = None
@@ -118,7 +123,9 @@ def main():
         policy = IdlePolicy()   # 占位, 实际由 model 控制
         policy.name = "model"
 
-    app = PolicyApp(policy, seed=args.seed, model_env=model_env, model=model)
+    immune = {1} if args.immune else None
+    app = PolicyApp(policy, seed=args.seed, model_env=model_env, model=model,
+                    self_harm_immune=immune)
     app.run()
 
 

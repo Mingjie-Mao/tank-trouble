@@ -37,10 +37,12 @@ PLAYER_TURRET = "#D23B32"
 
 
 class App:
-    def __init__(self, seed=None, two_players=False):
+    def __init__(self, seed=None, two_players=False, self_harm_immune=None):
         self.seed = seed
         self.two_players = two_players
-        self.game = Game(seed=seed, ai_enabled=not two_players)
+        self.self_harm_immune = self_harm_immune
+        self.game = Game(seed=seed, ai_enabled=not two_players,
+                         self_harm_immune=self_harm_immune)
         self.rng = random.Random()
 
         self.root = tk.Tk()
@@ -85,7 +87,8 @@ class App:
     def _on_key_down(self, event):
         k = self._key_name(event)
         if k == "r":
-            self.game = Game(seed=None, ai_enabled=not self.two_players)
+            self.game = Game(seed=None, ai_enabled=not self.two_players,
+                             self_harm_immune=self.self_harm_immune)
             return
         self.pressed.add(k)
 
