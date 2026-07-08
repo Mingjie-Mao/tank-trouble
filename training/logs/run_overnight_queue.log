@@ -1,0 +1,410 @@
+[queue] 07-08 00:13 等待 iter01 定级完成 (最多 3h)...
+[queue] 07-08 02:14 定级已完成, 发车迭代
+[queue] 07-08 02:14 启动第 2/3/4 轮 (每轮 3000 局采集 + 400 局评测门)
+专家迭代: 从第 2 轮起连跑 3 轮, 8 进程, 每轮 3000 局采集 + 400 局配对评测
+
+======== 专家迭代 第 2 轮 ========
+---- [2.1] 学生自打采集 ----
+  采集: 8 进程 x 375 局, 学生=scorenet_best.pt
+  采集完成: 639077 样本 / 3000 局 / 9806s
+  学生现场体检(含5%噪声): 胜 52.4% 双亡 11.2% 平均后悔 105.1分 致死误判 9.18%
+---- [2.2] 聚合重训 ----
+  数据聚合: 26 shard -> 1500892 样本
+  epoch 1/20  训练MSE 0.2801  验证MSE 0.2394  top1一致 12.5%  top3覆盖 30.9%  25s
+  epoch 2/20  训练MSE 0.2250  验证MSE 0.2129  top1一致 11.9%  top3覆盖 28.3%  49s
+  epoch 3/20  训练MSE 0.2005  验证MSE 0.1981  top1一致 11.2%  top3覆盖 30.0%  72s
+  epoch 4/20  训练MSE 0.1832  验证MSE 0.1798  top1一致 10.8%  top3覆盖 26.8%  96s
+  epoch 5/20  训练MSE 0.1685  验证MSE 0.1667  top1一致 11.6%  top3覆盖 29.0%  120s
+  epoch 6/20  训练MSE 0.1579  验证MSE 0.1600  top1一致 15.9%  top3覆盖 37.3%  143s
+  epoch 7/20  训练MSE 0.1471  验证MSE 0.1627  top1一致 11.3%  top3覆盖 27.7%  166s
+  epoch 8/20  训练MSE 0.1400  验证MSE 0.1464  top1一致 9.0%  top3覆盖 21.9%  190s
+  epoch 9/20  训练MSE 0.1335  验证MSE 0.1418  top1一致 9.5%  top3覆盖 25.3%  212s
+  epoch 10/20  训练MSE 0.1278  验证MSE 0.1373  top1一致 11.3%  top3覆盖 27.6%  236s
+  epoch 11/20  训练MSE 0.1231  验证MSE 0.1336  top1一致 14.2%  top3覆盖 33.8%  259s
+  epoch 12/20  训练MSE 0.1181  验证MSE 0.1319  top1一致 17.1%  top3覆盖 39.8%  283s
+  epoch 13/20  训练MSE 0.1150  验证MSE 0.1298  top1一致 11.2%  top3覆盖 26.0%  307s
+  epoch 14/20  训练MSE 0.1132  验证MSE 0.1257  top1一致 10.8%  top3覆盖 25.7%  331s
+  epoch 15/20  训练MSE 0.1078  验证MSE 0.1247  top1一致 10.5%  top3覆盖 25.9%  354s
+  epoch 16/20  训练MSE 0.1059  验证MSE 0.1199  top1一致 11.7%  top3覆盖 29.2%  377s
+  epoch 17/20  训练MSE 0.1022  验证MSE 0.1205  top1一致 12.1%  top3覆盖 28.7%  400s
+  epoch 18/20  训练MSE 0.1000  验证MSE 0.1225  top1一致 12.0%  top3覆盖 30.1%  423s
+  epoch 19/20  训练MSE 0.0985  验证MSE 0.1198  top1一致 13.7%  top3覆盖 31.5%  447s
+  epoch 20/20  训练MSE 0.0959  验证MSE 0.1148  top1一致 11.2%  top3覆盖 27.1%  470s
+  网络已保存 /Users/cichlidfish/tank_trouble/training/models/iter02_scorenet.pt
+---- [2.3] 评测门 (配对新种子) ----
+  新网络: 胜 68.2% 双亡 7.5%  |  旧冠军: 胜 67.2%  (400局同种子配对, 1230s)
+  ✅ 晋升: iter02_scorenet.pt -> scorenet_best.pt (67.2% -> 68.2%)
+
+======== 专家迭代 第 3 轮 ========
+---- [3.1] 学生自打采集 ----
+  采集: 8 进程 x 375 局, 学生=scorenet_best.pt
+  采集完成: 642291 样本 / 3000 局 / 9506s
+  学生现场体检(含5%噪声): 胜 52.1% 双亡 10.9% 平均后悔 100.0分 致死误判 8.67%
+---- [3.2] 聚合重训 ----
+  数据聚合: 34 shard -> 2143183 样本
+  epoch 1/20  训练MSE 0.2693  验证MSE 0.2322  top1一致 11.0%  top3覆盖 28.9%  35s
+  epoch 2/20  训练MSE 0.2206  验证MSE 0.2293  top1一致 16.6%  top3覆盖 38.6%  68s
+  epoch 3/20  训练MSE 0.1989  验证MSE 0.1984  top1一致 14.0%  top3覆盖 33.5%  101s
+  epoch 4/20  训练MSE 0.1799  验证MSE 0.1797  top1一致 13.1%  top3覆盖 32.1%  134s
+  epoch 5/20  训练MSE 0.1660  验证MSE 0.1706  top1一致 17.2%  top3覆盖 39.3%  166s
+  epoch 6/20  训练MSE 0.1543  验证MSE 0.1578  top1一致 10.4%  top3覆盖 25.6%  199s
+  epoch 7/20  训练MSE 0.1452  验证MSE 0.1545  top1一致 12.4%  top3覆盖 30.9%  230s
+  epoch 8/20  训练MSE 0.1376  验证MSE 0.1469  top1一致 12.2%  top3覆盖 29.7%  262s
+  epoch 9/20  训练MSE 0.1318  验证MSE 0.1461  top1一致 10.6%  top3覆盖 26.6%  293s
+  epoch 10/20  训练MSE 0.1258  验证MSE 0.1464  top1一致 10.3%  top3覆盖 25.6%  324s
+  epoch 11/20  训练MSE 0.1212  验证MSE 0.1500  top1一致 9.2%  top3覆盖 23.5%  355s
+  epoch 12/20  训练MSE 0.1171  验证MSE 0.1314  top1一致 11.9%  top3覆盖 29.1%  387s
+  epoch 13/20  训练MSE 0.1129  验证MSE 0.1269  top1一致 12.2%  top3覆盖 29.4%  417s
+  epoch 14/20  训练MSE 0.1101  验证MSE 0.1366  top1一致 10.1%  top3覆盖 24.7%  450s
+  epoch 15/20  训练MSE 0.1069  验证MSE 0.1218  top1一致 12.4%  top3覆盖 31.2%  481s
+  epoch 16/20  训练MSE 0.1039  验证MSE 0.1221  top1一致 10.4%  top3覆盖 25.5%  512s
+  epoch 17/20  训练MSE 0.1006  验证MSE 0.1168  top1一致 13.0%  top3覆盖 31.2%  544s
+  epoch 18/20  训练MSE 0.0991  验证MSE 0.1292  top1一致 13.2%  top3覆盖 32.6%  576s
+  epoch 19/20  训练MSE 0.0972  验证MSE 0.1237  top1一致 12.6%  top3覆盖 31.0%  609s
+  epoch 20/20  训练MSE 0.0946  验证MSE 0.1188  top1一致 10.6%  top3覆盖 26.7%  640s
+  网络已保存 /Users/cichlidfish/tank_trouble/training/models/iter03_scorenet.pt
+---- [3.3] 评测门 (配对新种子) ----
+  新网络: 胜 65.5% 双亡 10.5%  |  旧冠军: 胜 67.0%  (400局同种子配对, 1234s)
+  ❌ 不晋升: 新 65.5% < 旧 67.0%, 数据保留, 下轮继续聚合
+
+======== 专家迭代 第 4 轮 ========
+---- [4.1] 学生自打采集 ----
+  采集: 8 进程 x 375 局, 学生=scorenet_best.pt
+Process SpawnPoolWorker-54:
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/pool.py", line 131, in worker
+    put((job, i, result))
+    ~~~^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/queues.py", line 397, in put
+    self._writer.send_bytes(obj)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+    ~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+BrokenPipeError: [Errno 32] Broken pipe
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/process.py", line 313, in _bootstrap
+    self.run()
+    ~~~~~~~~^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/pool.py", line 136, in worker
+    put((job, i, (False, wrapped)))
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/queues.py", line 397, in put
+    self._writer.send_bytes(obj)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+    ~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+BrokenPipeError: [Errno 32] Broken pipe
+Process SpawnPoolWorker-53:
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/pool.py", line 131, in worker
+    put((job, i, result))
+    ~~~^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/queues.py", line 397, in put
+    self._writer.send_bytes(obj)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+    ~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+BrokenPipeError: [Errno 32] Broken pipe
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/process.py", line 313, in _bootstrap
+    self.run()
+    ~~~~~~~~^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/pool.py", line 136, in worker
+    put((job, i, (False, wrapped)))
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/queues.py", line 397, in put
+    self._writer.send_bytes(obj)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+    ~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+BrokenPipeError: [Errno 32] Broken pipe
+Process SpawnPoolWorker-52:
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/pool.py", line 131, in worker
+    put((job, i, result))
+    ~~~^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/queues.py", line 397, in put
+    self._writer.send_bytes(obj)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+    ~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+BrokenPipeError: [Errno 32] Broken pipe
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/process.py", line 313, in _bootstrap
+    self.run()
+    ~~~~~~~~^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/pool.py", line 136, in worker
+    put((job, i, (False, wrapped)))
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/queues.py", line 397, in put
+    self._writer.send_bytes(obj)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+    ~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+BrokenPipeError: [Errno 32] Broken pipe
+Process SpawnPoolWorker-56:
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/pool.py", line 131, in worker
+    put((job, i, result))
+    ~~~^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/queues.py", line 397, in put
+    self._writer.send_bytes(obj)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+    ~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+BrokenPipeError: [Errno 32] Broken pipe
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/process.py", line 313, in _bootstrap
+    self.run()
+    ~~~~~~~~^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/pool.py", line 136, in worker
+    put((job, i, (False, wrapped)))
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/queues.py", line 397, in put
+    self._writer.send_bytes(obj)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+    ~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+BrokenPipeError: [Errno 32] Broken pipe
+Process SpawnPoolWorker-50:
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/pool.py", line 131, in worker
+    put((job, i, result))
+    ~~~^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/queues.py", line 397, in put
+    self._writer.send_bytes(obj)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+    ~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+BrokenPipeError: [Errno 32] Broken pipe
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/process.py", line 313, in _bootstrap
+    self.run()
+    ~~~~~~~~^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/pool.py", line 136, in worker
+    put((job, i, (False, wrapped)))
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/queues.py", line 397, in put
+    self._writer.send_bytes(obj)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+    ~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+BrokenPipeError: [Errno 32] Broken pipe
+Process SpawnPoolWorker-55:
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/pool.py", line 131, in worker
+    put((job, i, result))
+    ~~~^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/queues.py", line 397, in put
+    self._writer.send_bytes(obj)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+    ~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+BrokenPipeError: [Errno 32] Broken pipe
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/process.py", line 313, in _bootstrap
+    self.run()
+    ~~~~~~~~^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/pool.py", line 136, in worker
+    put((job, i, (False, wrapped)))
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/queues.py", line 397, in put
+    self._writer.send_bytes(obj)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+    ~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+BrokenPipeError: [Errno 32] Broken pipe
+Process SpawnPoolWorker-49:
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/pool.py", line 131, in worker
+    put((job, i, result))
+    ~~~^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/queues.py", line 397, in put
+    self._writer.send_bytes(obj)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+    ~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+BrokenPipeError: [Errno 32] Broken pipe
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/process.py", line 313, in _bootstrap
+    self.run()
+    ~~~~~~~~^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/pool.py", line 136, in worker
+    put((job, i, (False, wrapped)))
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/queues.py", line 397, in put
+    self._writer.send_bytes(obj)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+    ~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+BrokenPipeError: [Errno 32] Broken pipe
+Process SpawnPoolWorker-51:
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/pool.py", line 131, in worker
+    put((job, i, result))
+    ~~~^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/queues.py", line 397, in put
+    self._writer.send_bytes(obj)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+    ~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+BrokenPipeError: [Errno 32] Broken pipe
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/process.py", line 313, in _bootstrap
+    self.run()
+    ~~~~~~~~^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/pool.py", line 136, in worker
+    put((job, i, (False, wrapped)))
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/queues.py", line 397, in put
+    self._writer.send_bytes(obj)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
+    self._send_bytes(m[offset:offset + size])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+    ~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.13/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+BrokenPipeError: [Errno 32] Broken pipe
+/opt/anaconda3/lib/python3.13/multiprocessing/resource_tracker.py:324: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown: {'/mp-d9kpn26d', '/mp-u6ejcvnl', '/mp-7ou4q_4g', '/mp-wy3mds9w', '/mp-8k42tmdi', '/mp-cdfzz2dv'}
+  warnings.warn(

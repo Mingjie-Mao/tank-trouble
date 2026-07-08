@@ -1,0 +1,39 @@
+专家迭代: 从第 1 轮起连跑 1 轮, 8 进程, 每轮 3000 局采集 + 400 局配对评测
+
+======== 专家迭代 第 1 轮 ========
+---- [1.1] 学生自打采集 ----
+  采集: 8 进程 x 375 局, 学生=p21b_scorenet.pt
+  采集完成: 742632 样本 / 3000 局 / 14875s
+  学生现场体检(含5%噪声): 胜 51.7% 双亡 9.9% 平均后悔 112.7分 致死误判 9.33%
+---- [1.2] 聚合重训 ----
+  数据聚合: 18 shard -> 861815 样本
+  epoch 1/20  训练MSE 0.2959  验证MSE 0.2459  top1一致 9.5%  top3覆盖 23.7%  12s
+  epoch 2/20  训练MSE 0.2332  验证MSE 0.2171  top1一致 12.9%  top3覆盖 30.5%  24s
+  epoch 3/20  训练MSE 0.2060  验证MSE 0.1965  top1一致 11.7%  top3覆盖 27.1%  36s
+  epoch 4/20  训练MSE 0.1856  验证MSE 0.1798  top1一致 12.7%  top3覆盖 30.1%  49s
+  epoch 5/20  训练MSE 0.1751  验证MSE 0.1754  top1一致 12.9%  top3覆盖 30.9%  61s
+  epoch 6/20  训练MSE 0.1610  验证MSE 0.1639  top1一致 10.7%  top3覆盖 26.7%  73s
+  epoch 7/20  训练MSE 0.1482  验证MSE 0.1520  top1一致 12.5%  top3覆盖 31.1%  85s
+  epoch 8/20  训练MSE 0.1417  验证MSE 0.1461  top1一致 12.4%  top3覆盖 30.9%  97s
+  epoch 9/20  训练MSE 0.1329  验证MSE 0.1402  top1一致 16.3%  top3覆盖 37.8%  110s
+  epoch 10/20  训练MSE 0.1280  验证MSE 0.1360  top1一致 10.4%  top3覆盖 26.2%  122s
+  epoch 11/20  训练MSE 0.1235  验证MSE 0.1442  top1一致 15.8%  top3覆盖 38.1%  134s
+  epoch 12/20  训练MSE 0.1179  验证MSE 0.1287  top1一致 13.4%  top3覆盖 33.4%  146s
+  epoch 13/20  训练MSE 0.1178  验证MSE 0.1338  top1一致 9.2%  top3覆盖 26.1%  158s
+  epoch 14/20  训练MSE 0.1107  验证MSE 0.1258  top1一致 10.6%  top3覆盖 26.3%  170s
+  epoch 15/20  训练MSE 0.1076  验证MSE 0.1223  top1一致 13.4%  top3覆盖 33.0%  182s
+  epoch 16/20  训练MSE 0.1067  验证MSE 0.1203  top1一致 13.4%  top3覆盖 33.0%  194s
+  epoch 17/20  训练MSE 0.1015  验证MSE 0.1256  top1一致 13.1%  top3覆盖 31.0%  207s
+  epoch 18/20  训练MSE 0.1010  验证MSE 0.1164  top1一致 11.6%  top3覆盖 28.5%  219s
+  epoch 19/20  训练MSE 0.0988  验证MSE 0.1154  top1一致 12.5%  top3覆盖 30.7%  234s
+  epoch 20/20  训练MSE 0.0953  验证MSE 0.1139  top1一致 10.2%  top3覆盖 24.8%  248s
+  网络已保存 /Users/cichlidfish/tank_trouble/training/models/iter01_scorenet.pt
+---- [1.3] 评测门 (配对新种子) ----
+  新网络: 胜 65.8% 双亡 7.0%  |  旧冠军: 胜 61.8%  (400局同种子配对, 1317s)
+  ✅ 晋升: iter01_scorenet.pt -> scorenet_best.pt (61.8% -> 65.8%)
+
+======== 全部轮次完成 ========
+iter,time,rounds,new_samples,total_samples,val_mse,val_top1,collect_win,collect_dd,collect_regret_mean,collect_lethal_rate,eval_n,eval_seed,new_win,new_dd,old_win,promoted,net
+1,2026-07-08 00:07,3000,742632,861815,0.11389,0.1015,0.5167,0.099,112.74,0.09328,400,8010000,0.6575,0.07,0.6175,True,iter01_scorenet.pt
+
+提醒: 官方加冕需手动双基定级 —— python3 training/score_distill.py eval --net training/models/scorenet_best.pt --n 1000 --seed 970000
