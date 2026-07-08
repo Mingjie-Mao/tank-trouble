@@ -300,11 +300,15 @@ class Bullet:
                 self.y = prev_y + self.y_speed
             # (护盾反弹检查: bullet:77-85, vs Laika 模式无护盾)
 
-        # 命中坦克 (bullet:90-104) — 无发射者豁免, 可命中自己!
+        # 命中坦克 (bullet:90-104) — 原版无发射者豁免, 可命中自己!
+        # 规则开关: self_harm_immune 里的坦克对自己的子弹免疫 (不自伤)。
         if self.deadly == 0:
             for i in range(g.tanks_count):
                 tank = g.tanks[i]
                 if tank.alive and tank.point_in_shape(self.x, self.y):
+                    if (tank is self.owner
+                            and self.owner.number in g.self_harm_immune):
+                        continue          # 自伤免疫: 跳过自己的子弹
                     g.register_hit(self.owner, tank)
                     self.owner.bullets_fired -= 1
                     g.destroy_tank(i)
@@ -329,10 +333,14 @@ class Game:
       settingsActiveWeapons=[] -> 永不生成武器箱, 纯子弹对决。
     """
 
-    def __init__(self, seed=None, ai_enabled=True, tanks=2):
+    def __init__(self, seed=None, ai_enabled=True, tanks=2,
+                 self_harm_immune=None):
         self.rng = _random.Random(seed)
         self.ai_enabled = ai_enabled
         self.tanks_count = tanks
+        # 规则开关: 这些坦克编号对**自己发射的**子弹免疫 (不自伤)。
+        # 默认空 = 原版行为 (可自杀)。用于把爱神风的对手改造成真对手。
+        self.self_harm_immune = set(self_harm_immune or ())
         # 设置项 (默认值)
         self.settings_max_bullets = C.SETTINGS_MAX_BULLETS
         self.settings_max_crates = C.SETTINGS_MAX_CRATES
