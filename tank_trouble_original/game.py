@@ -311,7 +311,8 @@ class Bullet:
                         continue          # 自伤免疫: 跳过自己的子弹
                     g.register_hit(self.owner, tank)
                     self.owner.bullets_fired -= 1
-                    g.destroy_tank(i)
+                    if tank.number not in g.invincible:
+                        g.destroy_tank(i)  # 无敌坦克: 触发命中事件但不死
                     self.removed = True
         if self.deadly > 0:
             self.deadly -= 1
@@ -334,13 +335,16 @@ class Game:
     """
 
     def __init__(self, seed=None, ai_enabled=True, tanks=2,
-                 self_harm_immune=None):
+                 self_harm_immune=None, invincible=None):
         self.rng = _random.Random(seed)
         self.ai_enabled = ai_enabled
         self.tanks_count = tanks
         # 规则开关: 这些坦克编号对**自己发射的**子弹免疫 (不自伤)。
         # 默认空 = 原版行为 (可自杀)。用于把爱神风的对手改造成真对手。
         self.self_harm_immune = set(self_harm_immune or ())
+        # 规则开关: 这些坦克编号无敌 (对**所有**子弹免疫), 但仍触发 hit 事件。
+        # 用于生存模式: 对手打不死, 我方命中它只为"加时", 非击杀。
+        self.invincible = set(invincible or ())
         # 设置项 (默认值)
         self.settings_max_bullets = C.SETTINGS_MAX_BULLETS
         self.settings_max_crates = C.SETTINGS_MAX_CRATES

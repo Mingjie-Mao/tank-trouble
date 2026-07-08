@@ -63,7 +63,7 @@ def make_sandbox(game, opp_model="L2", rng_seed=0):
                  "reachable_index", "settings_max_bullets",
                  "settings_max_crates", "settings_crate_spawn_modifier",
                  "settings_active_weapons", "tanks_count", "ai_enabled",
-                 "self_harm_immune"):
+                 "self_harm_immune", "invincible"):
         if hasattr(game, attr):
             setattr(sb, attr, getattr(game, attr))
     # ---- 洗掉隐藏信息 ----
