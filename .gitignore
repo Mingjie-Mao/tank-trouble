@@ -13,3 +13,4 @@ tank-trouble_flash/
 training/distill_data/
 training/models/*.pt
 training/score_data/
+training/value_data/

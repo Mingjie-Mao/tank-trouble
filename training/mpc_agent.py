@@ -88,12 +88,16 @@ def make_sandbox(game, opp_model="L2", rng_seed=0):
 
 # ================================================================ 前推打分
 
-def rollout(sandbox, first_action, hold=16, horizon=48):
+def rollout(sandbox, first_action, hold=16, horizon=48, leaf_fn=None):
     """沙盒中执行: 前 hold 帧用候选动作, 之后松开火保持行驶, 共 horizon 帧。
 
     返回评分 (越大越好):
       我死 -1000+t (晚死略好) | 杀敌且存活 +1000-t (早杀略好)
-      存活: -威胁 - 0.5*路径距离 (温和引导)
+      存活到期: leaf_fn(sandbox) 若给定 (学出来的价值), 否则温和启发式
+
+    leaf_fn: 可选叶子评估器 (价值叶子)。仅在"存活到 horizon"时替换末端启发式;
+      rollout 内真实发生的生/死 (±1000) 永远优先, 与 AlphaZero 结构一致
+      (真终局用真值, 未终局才用价值估计)。约定返回同 ±1000 量纲 (= 1000*V)。
     """
     me = sandbox.tanks[0]
     th, tu, f = first_action
@@ -114,7 +118,9 @@ def rollout(sandbox, first_action, hold=16, horizon=48):
             return -1000.0 + t
         if not sandbox.tanks[1].alive and me.alive and t >= hold:
             return 1000.0 - t
-    # 存活到期: 温和启发式
+    # 存活到期: 价值叶子优先, 否则温和启发式
+    if leaf_fn is not None:
+        return leaf_fn(sandbox)
     en = sandbox.tanks[1]
     score = 0.0
     if not en.alive:
@@ -138,12 +144,13 @@ class MPCPolicy:
     name = "mpc"
 
     def __init__(self, opp_model="L2", horizon=48, hold=16, n_samples=1,
-                 seed=0):
+                 seed=0, leaf_fn=None):
         self.opp_model = opp_model
         self.horizon = horizon
         self.hold = hold
         self.n_samples = n_samples   # >1 时对 L2 的 RNG 多次采样取均值
         self.rng = random.Random(seed)
+        self.leaf_fn = leaf_fn       # 价值叶子 (None = 用启发式末端)
 
     def reset(self):
         pass
@@ -158,7 +165,8 @@ class MPCPolicy:
             for k in range(self.n_samples):
                 sb = make_sandbox(game, self.opp_model,
                                   rng_seed=self.rng.randrange(1 << 30))
-                total += rollout(sb, a, self.hold, self.horizon)
+                total += rollout(sb, a, self.hold, self.horizon,
+                                 leaf_fn=self.leaf_fn)
             s = total / self.n_samples
             if s > best_s:
                 best_s, best_a = s, a
