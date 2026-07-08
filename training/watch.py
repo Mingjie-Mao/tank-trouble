@@ -65,27 +65,46 @@ class PolicyApp(App):
 
 
 class SurvivalApp(PolicyApp):
-    """P24 生存模式回放: Laika 无敌, 命中续命, 时间条归零换局。
+    """P24v2 生存模式回放: 衰减计分板 + 三本账 HUD。
 
-    时间条规则与 survival_mode.run_survival 一致; 我方死亡走引擎原生
-    回合循环 (new_round 事件重置时间条), 时间耗尽则整局重开。
+    经济规则复用 survival_mode.Ledger (与采集/评测同一实现)。
+    死亡走引擎原生回合循环 (new_round 重开账本); 流干/到时换新局。
     """
 
     def __init__(self, policy, seed=None):
-        from training.survival_mode import DEFAULT_CFG
-        self.cfg = dict(DEFAULT_CFG)
-        self.clock = self.cfg["start_frames"]
-        self.hits = 0
-        self.round_frames = 0
-        self.expire_count = -1        # >=0: 展示"时间耗尽"倒计时
+        from training.survival_mode import Ledger, ECON, FPS
+        self._Ledger, self._econ, self._fps = Ledger, ECON, FPS
+        self.ledger = None
+        self.dead_wait = False
+        self.expire_count = -1
+        self.settle_msg = ""
         super().__init__(policy, seed=seed, invincible={1})
         self.root.title(
-            f"Tank Trouble — 生存模式: {policy_name(policy)} vs 无敌Laika")
+            f"Tank Trouble — 生存模式v2: {policy_name(policy)} vs 无敌Laika")
 
     def _tick(self):
         g = self.game
-        if self.expire_count < 0:
-            inp = self.policy.act(g)
+        if self.ledger is None:
+            self.ledger = self._Ledger(g)
+        if self.dead_wait:
+            for ev in g.step():
+                if ev[0] == "new_round":
+                    self.ledger = None
+                    self.dead_wait = False
+                    self.settle_msg = ""
+        elif self.expire_count >= 0:
+            self.expire_count -= 1
+            if self.expire_count == 0:
+                from tank_trouble_original.game import Game
+                self.game = Game(seed=None, ai_enabled=True, invincible={1})
+                self.ledger = None
+                self.expire_count = -1
+                self.settle_msg = ""
+        else:
+            if hasattr(self.policy, "act_ctx"):
+                inp = self.policy.act_ctx(g, self.ledger)
+            else:
+                inp = self.policy.act(g)
             t0 = g.tanks[0]
             t0.forward = bool(inp.get("forward", False))
             t0.backup = bool(inp.get("backup", False))
@@ -93,49 +112,47 @@ class SurvivalApp(PolicyApp):
             t0.turn_right = bool(inp.get("turn_right", False))
             t0.fire = bool(inp.get("fire", False))
             events = g.step()
-            self.round_frames += 1
-            if g.tanks[0].alive and not g.frozen:
-                self.clock -= 1
-            for ev in events:
-                if ev[0] == "hit" and ev[1] == 0 and ev[2] == 1:
-                    self.clock += self.cfg["hit_bonus_frames"]
-                    self.hits += 1
-                elif ev[0] == "new_round":
-                    self.clock = self.cfg["start_frames"]
-                    self.hits = 0
-                    self.round_frames = 0
-            if self.clock <= 0 or self.round_frames >= self.cfg["cap_frames"]:
-                self.expire_count = 37        # ~1.5s 提示后换局
-        else:
-            self.expire_count -= 1
-            if self.expire_count == 0:
-                from tank_trouble_original.game import Game
-                self.game = Game(seed=None, ai_enabled=True, invincible={1})
-                self.clock = self.cfg["start_frames"]
-                self.hits = 0
-                self.round_frames = 0
-                self.expire_count = -1
+            end = self.ledger.on_frame(g, events)
+            if end == "death":
+                self.settle_msg = (f"被击杀 — 结算 0 "
+                                   f"(身价 {self.ledger.pool:.0f} 没收)")
+                self.dead_wait = True
+            elif end == "drain":
+                self.settle_msg = "分数流干 — 结算 0"
+                self.expire_count = 37
+            elif end == "cap":
+                self.settle_msg = f"30s 到时 — 结算 {self.ledger.pool:.0f}"
+                self.expire_count = 50
         self._draw()
         self.root.after(40, self._tick)
 
     def _draw(self):
         super()._draw()
+        led = self.ledger
+        if led is None:
+            return
         cv = self.canvas
-        secs = max(0, self.clock) / 25.0
-        frac = min(1.0, max(0.0, self.clock / 1250.0))   # 满条 = 50s
-        x0, y0, w, h = 12, 4, 220, 12
+        x0, y0, w, h = 12, 4, 200, 12
+        frac = min(1.0, max(0.0, led.pool / 300.0))      # 满条 = 300 分
         cv.create_rectangle(x0, y0, x0 + w, y0 + h,
                             outline="#333333", fill="#DDDDDD")
-        color = "#2E8B57" if self.clock > self.cfg["start_frames"] \
-            else "#CC3322"
+        color = ("#2E8B57" if led.pool >= self._econ["start"]
+                 else "#CC7722" if led.pool >= 40 else "#CC3322")
         cv.create_rectangle(x0, y0, x0 + w * frac, y0 + h,
                             outline="", fill=color)
+        cv.create_line(x0 + w / 3.0, y0, x0 + w / 3.0, y0 + h,
+                       fill="#333333")                   # 100 分基准线
+        stuck_pct = (100.0 * led.stuck_frames / led.frames
+                     if led.frames else 0.0)
+        remain = max(0, self._econ["cap"] - led.frames) / self._fps
         cv.create_text(x0 + w + 10, y0 + h / 2, anchor="w",
-                       text=f"时间条 {secs:.1f}s   命中 {self.hits}",
+                       text=(f"分数 {led.pool:.0f}  命中 {led.hits}  "
+                             f"风格 {led.style:+.0f}  卡墙 {stuck_pct:.0f}%"
+                             f"  剩余 {remain:.0f}s"),
                        font=("Helvetica", 12, "bold"), fill="#333333")
-        if self.expire_count >= 0:
-            cv.create_text(x0 + w / 2, y0 + h + 16, anchor="w",
-                           text="时间耗尽 — 换局",
+        if self.settle_msg:
+            cv.create_text(x0, y0 + h + 16, anchor="w",
+                           text=self.settle_msg,
                            font=("Helvetica", 13, "bold"), fill="#CC3322")
 
 
@@ -157,6 +174,8 @@ def main():
                     help="混合体候选数 (越大越强越慢)")
     ap.add_argument("--immune", action="store_true",
                     help="对手(Laika)对自己的子弹免疫, 不再神风自杀")
+    ap.add_argument("--hunt", action="store_true",
+                    help="survival 用纯狩猎档老师 (无风格项, 作对照)")
     args = ap.parse_args()
 
     model = model_env = None
@@ -176,8 +195,8 @@ def main():
         policy.name = "mpc"
     elif args.policy == "survival":
         from training.survival_mode import SurvivalMPC
-        policy = SurvivalMPC()
-        policy.name = "生存老师(MPC)"
+        policy = SurvivalMPC(style=not args.hunt)
+        policy.name = "纯狩猎老师" if args.hunt else "风格老师(MPC)"
         app = SurvivalApp(policy, seed=args.seed)
         app.run()
         return
