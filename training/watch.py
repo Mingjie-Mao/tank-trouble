@@ -23,13 +23,15 @@ class PolicyApp(App):
     """让策略接管 tank0 的渲染窗口 (R 键换局仍可用)"""
 
     def __init__(self, policy, seed=None, model_env=None, model=None,
-                 self_harm_immune=None, invincible=None):
+                 self_harm_immune=None, invincible=None,
+                 hit_immunity_frames=None):
         self.policy = policy
         self.model_env = model_env    # ModelPolicy 用: 独立观测环境
         self.model = model
         super().__init__(seed=seed, two_players=False,
                          self_harm_immune=self_harm_immune,
-                         invincible=invincible)
+                         invincible=invincible,
+                         hit_immunity_frames=hit_immunity_frames)
         tag = " [Laika免疫自伤]" if self_harm_immune else ""
         self.root.title(f"Tank Trouble — {policy_name(policy)} vs Laika{tag}")
 
@@ -65,7 +67,7 @@ class PolicyApp(App):
 
 
 class SurvivalApp(PolicyApp):
-    """P24v2 生存模式回放: 衰减计分板 + 三本账 HUD。
+    """P24v3 生存模式回放: 免疫穿透计分板 + 遥测 HUD。
 
     经济规则复用 survival_mode.Ledger (与采集/评测同一实现)。
     死亡走引擎原生回合循环 (new_round 重开账本); 流干/到时换新局。
@@ -78,9 +80,11 @@ class SurvivalApp(PolicyApp):
         self.dead_wait = False
         self.expire_count = -1
         self.settle_msg = ""
-        super().__init__(policy, seed=seed, invincible={1})
+        super().__init__(
+            policy, seed=seed, invincible={1},
+            hit_immunity_frames={1: ECON["hit_immunity"]})
         self.root.title(
-            f"Tank Trouble — 生存模式v2: {policy_name(policy)} vs 无敌Laika")
+            f"Tank Trouble — 生存模式v3: {policy_name(policy)} vs 无敌Laika")
 
     def _tick(self):
         g = self.game
@@ -96,7 +100,9 @@ class SurvivalApp(PolicyApp):
             self.expire_count -= 1
             if self.expire_count == 0:
                 from tank_trouble_original.game import Game
-                self.game = Game(seed=None, ai_enabled=True, invincible={1})
+                self.game = Game(
+                    seed=None, ai_enabled=True, invincible={1},
+                    hit_immunity_frames={1: self._econ["hit_immunity"]})
                 self.ledger = None
                 self.expire_count = -1
                 self.settle_msg = ""
@@ -144,11 +150,18 @@ class SurvivalApp(PolicyApp):
                        fill="#333333")                   # 100 分基准线
         stuck_pct = (100.0 * led.stuck_frames / led.frames
                      if led.frames else 0.0)
+        empty_pct = (100.0 * led.empty_frames / led.frames
+                     if led.frames else 0.0)
+        stationary_pct = (
+            100.0 * led.stationary_frames / led.stationary_observed_frames
+            if led.stationary_observed_frames else 0.0)
+        immunity = self.game.hit_immunity_remaining[1] / self._fps
         remain = max(0, self._econ["cap"] - led.frames) / self._fps
         cv.create_text(x0 + w + 10, y0 + h / 2, anchor="w",
                        text=(f"分数 {led.pool:.0f}  命中 {led.hits}  "
                              f"风格 {led.style:+.0f}  卡墙 {stuck_pct:.0f}%"
-                             f"  剩余 {remain:.0f}s"),
+                             f"  空仓 {empty_pct:.0f}%  静止 {stationary_pct:.0f}%"
+                             f"  免疫 {immunity:.1f}s  剩余 {remain:.0f}s"),
                        font=("Helvetica", 12, "bold"), fill="#333333")
         if self.settle_msg:
             cv.create_text(x0, y0 + h + 16, anchor="w",

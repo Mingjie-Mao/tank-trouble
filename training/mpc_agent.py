@@ -63,7 +63,7 @@ def make_sandbox(game, opp_model="L2", rng_seed=0):
                  "reachable_index", "settings_max_bullets",
                  "settings_max_crates", "settings_crate_spawn_modifier",
                  "settings_active_weapons", "tanks_count", "ai_enabled",
-                 "self_harm_immune", "invincible"):
+                 "self_harm_immune", "invincible", "hit_immunity_duration"):
         if hasattr(game, attr):
             setattr(sb, attr, getattr(game, attr))
     # ---- 洗掉隐藏信息 ----
@@ -76,7 +76,7 @@ def make_sandbox(game, opp_model="L2", rng_seed=0):
     sb.events = []
     for attr in ("frame", "alive_count", "end_count", "reset_count",
                  "frozen", "shake", "crate_timer", "_bullet_depth",
-                 "round_number", "scores"):
+                 "round_number", "scores", "hit_immunity_remaining"):
         v = getattr(game, attr)
         setattr(sb, attr, list(v) if isinstance(v, list) else v)
     # ---- 对手模型 ----

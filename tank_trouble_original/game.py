@@ -309,6 +309,8 @@ class Bullet:
                     if (tank is self.owner
                             and self.owner.number in g.self_harm_immune):
                         continue          # 自伤免疫: 跳过自己的子弹
+                    if g.hit_immunity_remaining[i] > 0:
+                        continue          # 受击免疫: 子弹穿透且不消失
                     g.register_hit(self.owner, tank)
                     self.owner.bullets_fired -= 1
                     if tank.number not in g.invincible:
@@ -335,7 +337,8 @@ class Game:
     """
 
     def __init__(self, seed=None, ai_enabled=True, tanks=2,
-                 self_harm_immune=None, invincible=None):
+                 self_harm_immune=None, invincible=None,
+                 hit_immunity_frames=None):
         self.rng = _random.Random(seed)
         self.ai_enabled = ai_enabled
         self.tanks_count = tanks
@@ -345,6 +348,12 @@ class Game:
         # 规则开关: 这些坦克编号无敌 (对**所有**子弹免疫), 但仍触发 hit 事件。
         # 用于生存模式: 对手打不死, 我方命中它只为"加时", 非击杀。
         self.invincible = set(invincible or ())
+        # 规则开关: 指定坦克被命中后获得若干帧免疫。免疫期间子弹穿透，
+        # 不触发 hit 事件也不消失。默认全 0，原版行为不变。
+        immunity = dict(hit_immunity_frames or {})
+        self.hit_immunity_duration = tuple(
+            max(0, int(immunity.get(i, 0))) for i in range(tanks))
+        self.hit_immunity_remaining = [0] * tanks
         # 设置项 (默认值)
         self.settings_max_bullets = C.SETTINGS_MAX_BULLETS
         self.settings_max_crates = C.SETTINGS_MAX_CRATES
@@ -388,6 +397,7 @@ class Game:
     def setup_battle(self):
         """frame_53 setupBattle + setupStandardMaze + deployTank"""
         self.round_number += 1
+        self.hit_immunity_remaining = [0] * self.tanks_count
         rng = self.rng
         TANKS = self.tanks_count
 
@@ -519,6 +529,9 @@ class Game:
     def register_hit(self, owner, victim):
         """frame_53:1950-2013 — 本地版只发事件 (Laika growl/scoff)"""
         self.events.append(("hit", owner.number, victim.number))
+        duration = self.hit_immunity_duration[victim.number]
+        if duration > 0:
+            self.hit_immunity_remaining[victim.number] = duration
 
     def destroy_tank(self, number):
         """frame_53:900-911"""
@@ -553,6 +566,10 @@ class Game:
         self.frame += 1
         self.events = []
         rng = self.rng
+
+        for i, remaining in enumerate(self.hit_immunity_remaining):
+            if remaining > 0:
+                self.hit_immunity_remaining[i] = remaining - 1
 
         # ---- _root.onEnterFrame (frame_53:2366-2536) ----
         # tankFields 更新 (2390-2397)

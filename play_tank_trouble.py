@@ -38,14 +38,16 @@ PLAYER_TURRET = "#D23B32"
 
 class App:
     def __init__(self, seed=None, two_players=False, self_harm_immune=None,
-                 invincible=None):
+                 invincible=None, hit_immunity_frames=None):
         self.seed = seed
         self.two_players = two_players
         self.self_harm_immune = self_harm_immune
         self.invincible = invincible
+        self.hit_immunity_frames = hit_immunity_frames
         self.game = Game(seed=seed, ai_enabled=not two_players,
                          self_harm_immune=self_harm_immune,
-                         invincible=invincible)
+                         invincible=invincible,
+                         hit_immunity_frames=hit_immunity_frames)
         self.rng = random.Random()
 
         self.root = tk.Tk()
@@ -92,7 +94,8 @@ class App:
         if k == "r":
             self.game = Game(seed=None, ai_enabled=not self.two_players,
                              self_harm_immune=self.self_harm_immune,
-                             invincible=self.invincible)
+                             invincible=self.invincible,
+                             hit_immunity_frames=self.hit_immunity_frames)
             return
         self.pressed.add(k)
 

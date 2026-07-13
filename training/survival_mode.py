@@ -1,5 +1,5 @@
 """
-P24 生存模式 v2 —— 衰减计分板课程: 逼出"主动狩猎 + 观赏性"
+P24 生存模式 v3 —— 免疫穿透 + 弹夹纪律 + 观赏性计分板
 
 规则 (用户策划定稿 2026-07-08):
   - Laika 无敌 (打不死, 命中仍触发 hit 事件); 我方一发即死 (含自伤)
@@ -7,6 +7,8 @@ P24 生存模式 v2 —— 衰减计分板课程: 逼出"主动狩猎 + 观赏�
     | 追击势能 +3/净靠近一格 (BFS, 守恒: 绕圈净额零)
     | 首访新格 +2 (4s 冷却) | 卡墙额外 -5/s
   - 结算: 被打死 -> 结算分清零 | 分数流干 -> 结算 0 | 30s 上限 -> 按现值
+  - Laika 每次受击后免疫 2s, 期间子弹穿透; 空弹夹状态额外 -5/s
+  - 静止只遥测不惩罚: 1s 窗口净位移 <0.3 格
   - 三本账遥测 (死亡不抹账): 命中账 / 风格账(势能+覆盖-卡墙) / 时间税
 
 设计约束:
@@ -21,6 +23,7 @@ P24 生存模式 v2 —— 衰减计分板课程: 逼出"主动狩猎 + 观赏�
 """
 
 import argparse
+import math
 import multiprocessing as mp
 import os
 import sys
@@ -37,6 +40,10 @@ ECON = dict(
     cover=2.0,              # /首访新格
     cover_cd=4 * FPS,       # 首访冷却 4s
     stuck=5.0 / FPS,        # 卡墙额外 -0.2/帧
+    empty_mag=5.0 / FPS,    # 5 发全在场时额外 -0.2/帧
+    hit_immunity=2 * FPS,   # Laika 受击后 2s 子弹穿透
+    stationary_window=FPS,  # 1s 窗口
+    stationary_dist=0.3,    # 净位移 <0.3 格记静止
     cap=30 * FPS,           # 30s 结算
 )
 DEATH_K = 200.0             # rollout 内死亡的期货代价 (丢掉全部未来收入)
@@ -73,9 +80,12 @@ class Ledger:
         self.econ = econ
         self.pool = econ["start"]
         self.led = dict(hit=0.0, approach=0.0, cover=0.0,
-                        stuck=0.0, decay=0.0)
+                        stuck=0.0, empty_mag=0.0, decay=0.0)
         self.hits = 0
         self.stuck_frames = 0
+        self.empty_frames = 0
+        self.stationary_frames = 0
+        self.stationary_observed_frames = 0
         self.cells = 0
         self.frames = 0
         self.visited = {}
@@ -83,6 +93,7 @@ class Ledger:
         self.visited[c] = 0
         self._prev_cell = c
         self._prev_en_cell = _cell(g, g.tanks[1])
+        self._positions = [(g.tanks[0].x, g.tanks[0].y)]
 
     @property
     def style(self):
@@ -103,6 +114,10 @@ class Ledger:
             return "death"                    # 结算清零; pool 保留作"清零前"
         self.pool -= econ["decay"]
         self.led["decay"] += econ["decay"]
+        if t0.bullets_fired >= g.settings_max_bullets:
+            self.pool -= econ["empty_mag"]
+            self.led["empty_mag"] += econ["empty_mag"]
+            self.empty_frames += 1
         if t0.hit_something:
             self.pool -= econ["stuck"]
             self.led["stuck"] += econ["stuck"]
@@ -110,6 +125,14 @@ class Ledger:
         # 追击势能: 以 Laika 上一帧位置为锚 —— 只有我方移动拨动指针
         # (空闲者恒得零, 被追近不计收入); 我方原路折返仍净额为零
         c = _cell(g, t0)
+        self._positions.append((t0.x, t0.y))
+        window = econ["stationary_window"]
+        if len(self._positions) > window:
+            old_x, old_y = self._positions.pop(0)
+            self.stationary_observed_frames += 1
+            if math.hypot(t0.x - old_x, t0.y - old_y) < \
+                    econ["stationary_dist"] * g.scale:
+                self.stationary_frames += 1
         if c != self._prev_cell:
             d_a = _cell_dist(g, self._prev_cell, self._prev_en_cell)
             d_b = _cell_dist(g, c, self._prev_en_cell)
@@ -137,7 +160,8 @@ class Ledger:
 def run_survival(policy, seed, econ=ECON, mirror=False):
     """跑一局, 返回遥测 dict。mirror=True 时忽略 policy, 玩家位挂 Laika AI。"""
     from tank_trouble_original.game import Game
-    g = Game(seed=seed, ai_enabled=True, invincible={1})
+    g = Game(seed=seed, ai_enabled=True, invincible={1},
+             hit_immunity_frames={1: econ["hit_immunity"]})
     if mirror:
         from tank_trouble_original.laika import LaikaAI
         g.tanks[0].ai = LaikaAI(g, g.tanks[0])
@@ -165,7 +189,11 @@ def run_survival(policy, seed, econ=ECON, mirror=False):
     alive_s = ledger.frames / FPS
     return dict(settle=settle, pool_final=ledger.pool, end=end,
                 frames=ledger.frames, alive_s=alive_s, hits=ledger.hits,
-                stuck_frames=ledger.stuck_frames, cells=ledger.cells,
+                stuck_frames=ledger.stuck_frames,
+                empty_frames=ledger.empty_frames,
+                stationary_frames=ledger.stationary_frames,
+                stationary_observed_frames=ledger.stationary_observed_frames,
+                cells=ledger.cells,
                 led=dict(ledger.led), style=ledger.style)
 
 
@@ -201,6 +229,8 @@ def survival_rollout(sandbox, first_action, pool, visited, frame_now,
         if not me.alive:
             return -pool - DEATH_K + 0.05 * t     # 全池没收+期货, 晚死略好
         delta -= econ["decay"]
+        if me.bullets_fired >= sandbox.settings_max_bullets:
+            delta -= econ["empty_mag"]
         if style:
             if me.hit_something:
                 delta -= econ["stuck"]
@@ -316,6 +346,9 @@ def _agg(results):
     hits = sum(r["hits"] for r in results)
     style = sum(r["style"] for r in results)
     stuck_f = sum(r["stuck_frames"] for r in results)
+    empty_f = sum(r["empty_frames"] for r in results)
+    stationary_f = sum(r["stationary_frames"] for r in results)
+    stationary_obs = sum(r["stationary_observed_frames"] for r in results)
     frames = sum(r["frames"] for r in results)
     deaths = [r for r in results if r["end"] == "death"]
     return dict(
@@ -326,6 +359,9 @@ def _agg(results):
         hit_iv=(tot_alive / hits) if hits else float("inf"),
         style_rate=style / tot_alive if tot_alive else 0.0,
         stuck_pct=100.0 * stuck_f / frames if frames else 0.0,
+        empty_pct=100.0 * empty_f / frames if frames else 0.0,
+        stationary_pct=(100.0 * stationary_f / stationary_obs
+                        if stationary_obs else 0.0),
         cells=sum(r["cells"] for r in results) / n,
         end_death=100.0 * len(deaths) / n,
         end_drain=100.0 * sum(r["end"] == "drain" for r in results) / n,
@@ -336,10 +372,12 @@ def _agg(results):
 
 
 def measure(kinds, n, workers):
-    print("===== [P24v2] 衰减计分板: 四方对照 =====", flush=True)
+    print("===== [P24v3] 免疫穿透计分板: 四方对照 =====", flush=True)
     print(f"经济: 起始{ECON['start']:.0f} 衰减{ECON['decay']*FPS:.0f}/s "
           f"命中+{ECON['hit']:.0f} 势能+{ECON['approach']:.0f}/格 "
           f"覆盖+{ECON['cover']:.0f} 卡墙-{ECON['stuck']*FPS:.0f}/s "
+          f"空弹夹-{ECON['empty_mag']*FPS:.0f}/s "
+          f"受击免疫{ECON['hit_immunity']/FPS:.0f}s "
           f"上限{ECON['cap']//FPS}s", flush=True)
     aggs = {}
     for kind in kinds:
@@ -357,7 +395,8 @@ def measure(kinds, n, workers):
               f"命中 {a['hits']:.1f}次/局 (间隔 {a['hit_iv']:.1f}s)",
               flush=True)
         print(f"  风格速率 {a['style_rate']:+.2f}/s  卡墙帧 "
-              f"{a['stuck_pct']:.1f}%  覆盖 {a['cells']:.1f}格/局",
+              f"{a['stuck_pct']:.1f}%  空弹夹 {a['empty_pct']:.1f}%  "
+              f"静止 {a['stationary_pct']:.1f}%  覆盖 {a['cells']:.1f}格/局",
               flush=True)
         print(f"  终局: 死{a['end_death']:.0f}% 流干{a['end_drain']:.0f}% "
               f"到时{a['end_cap']:.0f}%  死亡时身价 "

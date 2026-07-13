@@ -1,7 +1,7 @@
 """
 P24 蒸馏管线: 风格老师 (SurvivalMPC style) -> 评分网络
 
-观测 = P21b 全知 408 维 + [分数池/300, 剩余时间比] = 410 维
+观测 = P21b 全知 408 维 + [分数池/300, 剩余时间比, 敌免疫剩余比] = 411 维
   (池/时间是状态不是未来函数 —— 终局护分/贫困冲刺等时变策略靠这两维)
 标签 = 18 候选 survival_rollout Δ池 (同决策步配对沙盒种子) / SCALE
 纪律 = 采集噪声只动移动维不强制开火 (P19); 决策每 2 帧一次 (成本减半)
@@ -30,15 +30,18 @@ MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "survival_data")
 SCALE = 300.0            # Δ池量纲: 命中+50 / 破产-(池+150) / 死亡-(池+200)
-CTX_DIM = 2
+CTX_DIM = 3
 DECIDE_EVERY = 2         # 决策间隔帧数 (间隔内保持动作)
 
 
-def ctx_features(ledger, econ):
+def ctx_features(game, ledger, econ):
     # 钳位: 原版验收的虚拟账本可能出训练分布 (池<0 / 超时), 拉回域内
     pool = max(0.0, ledger.pool)
     remain = max(0.0, econ["cap"] - ledger.frames)
-    return np.asarray([pool / 300.0, remain / econ["cap"]],
+    immunity = 0.0
+    if econ["hit_immunity"] > 0:
+        immunity = game.hit_immunity_remaining[1] / econ["hit_immunity"]
+    return np.asarray([pool / 300.0, remain / econ["cap"], immunity],
                       dtype=np.float32)
 
 
@@ -51,10 +54,11 @@ def bind_env(env, game, frames):
     env._prev_phi = env._phi()
 
 
-def build_obs(env, game, ledger, econ):
+def build_obs(env, game, ledger, econ, ctx_dim=CTX_DIM):
     from training.score_distill import full_obs
     bind_env(env, game, ledger.frames)
-    return np.concatenate([full_obs(env), ctx_features(ledger, econ)])
+    return np.concatenate([full_obs(env),
+                           ctx_features(game, ledger, econ)[:ctx_dim]])
 
 
 def _apply(t0, th, tu, f):
@@ -78,7 +82,8 @@ def _collect_worker(job):
     telem = dict(settle=0.0, hits=0, frames=0, stuck=0, style=0.0,
                  death=0, drain=0, cap=0)
     for r in range(n_games):
-        g = Game(seed=seed0 + r, ai_enabled=True, invincible={1})
+        g = Game(seed=seed0 + r, ai_enabled=True, invincible={1},
+                 hit_immunity_frames={1: ECON["hit_immunity"]})
         ledger = Ledger(g)
         end = "cap"
         act = (1, 1, 0)
@@ -164,6 +169,7 @@ class SurvivalScoreNetPolicy:
         self._econ = ECON
         payload = torch.load(net_path, weights_only=True)
         in_dim = payload.get("in_dim", FULL_OBS_DIM + CTX_DIM)
+        self._ctx_dim = in_dim - FULL_OBS_DIM
         self.net = build_net(in_dim)
         self.net.load_state_dict(payload["state_dict"])
         self.net.eval()
@@ -176,7 +182,7 @@ class SurvivalScoreNetPolicy:
         self._vledger = None
 
     def _decide(self, game, ledger):
-        obs = build_obs(self._env, game, ledger, self._econ)
+        obs = build_obs(self._env, game, ledger, self._econ, self._ctx_dim)
         with self._torch.no_grad():
             scores = self.net(self._torch.as_tensor(obs).unsqueeze(0))[0]
         th, tu, f = self._cands[int(scores.argmax())]

@@ -14,6 +14,9 @@ training/distill_data/
 training/models/*.pt
 training/score_data/
 training/value_data/
+training/survival_data/
+training/opportunity_data/
+training/opportunity_data_v2/
 
 # 本地会话恢复档 (个人对话记录, 勿公开)
 restored_session_*.md
