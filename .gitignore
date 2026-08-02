@@ -20,3 +20,17 @@ training/opportunity_data_v2/
 
 # 本地会话恢复档 (个人对话记录, 勿公开)
 restored_session_*.md
+
+# Local experiment artifacts. Keep reproducible source/configuration in Git,
+# but leave machine-specific backups, raw datasets, logs, and bulk run output local.
+local_backups/
+screenlog.*
+training/logs/*.log
+training/logs/*.pid
+training/p26_amortized_data/
+training/analysis/runs/*
+!training/analysis/runs/exact_state_clone_fidelity.json
+!training/analysis/runs/exact_state_fire_cost_official_3x40.json
+!training/analysis/runs/exact_teacher_unseen_3x100.json
+!training/analysis/runs/sparse_exact_safety_3x40_fixed_scheduler.json
+!training/analysis/runs/sparse_exact_safety_narrow_replan_unseen_3x100_stopped_summary.json

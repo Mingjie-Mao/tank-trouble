@@ -1,0 +1,65 @@
+{
+  "name": "sparse_exact_state_safety_v1",
+  "scope": "privileged local high-reliability hybrid policy",
+  "pure_network": false,
+  "policy": "training.sparse_exact_safety_policy.SparseExactSafetyPolicy",
+  "base_net": "training/models/p26_amortized_mpc_iter05.pt",
+  "value_net": "training/models/p27b_risk_value_iter00.pt",
+  "configuration": {
+    "audit_interval": 1,
+    "behavior_full_search": true,
+    "critical_hold_frames": 0,
+    "critical_safe_roots": 0,
+    "fire_margin": 0.16,
+    "min_unsecured_fire_gain": 2.0,
+    "narrow_replan_safe_roots": 0,
+    "proactive_interval": 48,
+    "search_dd_penalty": 0.45,
+    "search_death_penalty": 0.18,
+    "search_hold_frames": 12,
+    "search_horizon": 72,
+    "search_kill_bonus": 0.05,
+    "successor_horizon": 72,
+    "successor_shield": true,
+    "successor_shield_max_safe_roots": 2,
+    "suppress_secured_fire": true,
+    "top_k": 12
+  },
+  "gate": {
+    "max_double_deaths": 1,
+    "min_wins": 116,
+    "passed": true
+  },
+  "benchmark": {
+    "double_deaths": 1,
+    "games": 120,
+    "losses": 0,
+    "report": "training/analysis/runs/sparse_exact_safety_3x40_fixed_scheduler.json",
+    "seed_bands": [
+      "970000:40",
+      "990000:40",
+      "973000:40"
+    ],
+    "wins": 119
+  },
+  "cost": {
+    "mean_round_search_frame_rate": 0.08656287676336977,
+    "pooled_search_frame_rate": 0.09328281266109908,
+    "pooled_audit_frame_rate": 0.9424682957005877,
+    "total_full_searches": 3619,
+    "total_policy_frames": 38796,
+    "total_simulated_frames": 7304904
+  },
+  "known_failure": {
+    "cause": "laika_bounce",
+    "result": "double_death",
+    "seed": 990008
+  },
+  "sha256": {
+    "training/exact_state.py": "e60c52d7325ba937c7b8f480aeaee6801b6bf8dac30c1975ad6e2a0363c24c34",
+    "training/exact_state_mpc_teacher.py": "3c3727c52d1544e35a5bc6e6943c39e6ebad10e2e0ea56acf7db3f0fd8fcc91d",
+    "training/models/p26_amortized_mpc_iter05.pt": "52de9683762b0397ca07392fc17c4f1aa9f73a5636d619fb093207c26e44f4ef",
+    "training/models/p27b_risk_value_iter00.pt": "a25ab908a499c1349fd5ad753e1c5ee40ad36d46c62d5892eebd2ecebb7ff398",
+    "training/sparse_exact_safety_policy.py": "605b3053b72ca9dd5e26a89db8ff1d0b2312f7341511229785ee079ca4079d1a"
+  }
+}

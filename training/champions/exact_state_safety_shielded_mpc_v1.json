@@ -1,0 +1,40 @@
+{
+  "base_net": "training/models/p26_amortized_mpc_iter05.pt",
+  "benchmark": {
+    "double_deaths": 0,
+    "games": 120,
+    "losses": 0,
+    "report": "training/analysis/runs/exact_state_fire_cost_official_3x40.json",
+    "seeds": [
+      "970000:40",
+      "990000:40",
+      "973000:40"
+    ],
+    "wins": 120
+  },
+  "configuration": {
+    "fire_margin": 0.16,
+    "min_unsecured_fire_gain": 2.0,
+    "search_dd_penalty": 0.45,
+    "search_death_penalty": 0.18,
+    "search_horizon": 72,
+    "search_kill_bonus": 0.05,
+    "search_max_dd": 0.0,
+    "search_max_death": 0.0,
+    "search_samples": 1,
+    "successor_horizon": 72,
+    "successor_shield": true,
+    "successor_shield_max_safe_roots": 2,
+    "suppress_secured_fire": true,
+    "top_k": 12
+  },
+  "name": "exact_state_safety_shielded_mpc_v1",
+  "scope": "privileged local exact-engine teacher",
+  "sha256": {
+    "training/exact_state.py": "e60c52d7325ba937c7b8f480aeaee6801b6bf8dac30c1975ad6e2a0363c24c34",
+    "training/exact_state_mpc_teacher.py": "3c3727c52d1544e35a5bc6e6943c39e6ebad10e2e0ea56acf7db3f0fd8fcc91d",
+    "training/models/p26_amortized_mpc_iter05.pt": "52de9683762b0397ca07392fc17c4f1aa9f73a5636d619fb093207c26e44f4ef",
+    "training/models/p27b_risk_value_iter00.pt": "a25ab908a499c1349fd5ad753e1c5ee40ad36d46c62d5892eebd2ecebb7ff398"
+  },
+  "value_net": "training/models/p27b_risk_value_iter00.pt"
+}

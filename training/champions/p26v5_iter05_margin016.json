@@ -1,0 +1,33 @@
+{
+  "name": "p26v5_iter05_margin016",
+  "model_path": "training/models/p26_amortized_mpc_iter05.pt",
+  "policy": "training.p26_amortized_mpc.P26Policy",
+  "selection": {
+    "fire_margin": 0.16,
+    "fire_threshold": 0.0,
+    "kill_weight": 0.0,
+    "death_weight": 0.0,
+    "double_death_weight": 0.0,
+    "survive_weight": 0.0,
+    "fire_prob_weight": 0.0
+  },
+  "official_results": {
+    "1000@970000": {
+      "win": 0.871,
+      "loss": 0.085,
+      "double_death": 0.04,
+      "draw": 0.004,
+      "shots_per_game": 2.7,
+      "hit_rate": 0.221
+    },
+    "500@990000": {
+      "win": 0.864,
+      "loss": 0.112,
+      "double_death": 0.024,
+      "draw": 0.0,
+      "shots_per_game": 2.6,
+      "hit_rate": 0.224
+    }
+  },
+  "promotion_note": "Current local deployment champion after P26v5 iter05 official grade. Aggregate over the two official seeds is about 86.9%, around 7 points above P26 iter04."
+}
