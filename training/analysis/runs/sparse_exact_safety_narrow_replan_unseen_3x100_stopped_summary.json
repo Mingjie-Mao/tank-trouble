@@ -1,0 +1,51 @@
+{
+  "candidate": "sparse_exact_safety_narrow_replan_safe_roots_3",
+  "completed_games": 152,
+  "double_deaths": 0,
+  "expected_games": 300,
+  "failures": [
+    {
+      "death_cause": "laika_bounce",
+      "full_searches": 89,
+      "result": "loss",
+      "seed": 983043
+    },
+    {
+      "death_cause": "laika_bounce",
+      "full_searches": 99,
+      "result": "loss",
+      "seed": 983064
+    },
+    {
+      "death_cause": "self",
+      "full_searches": 120,
+      "result": "loss",
+      "seed": 993007
+    },
+    {
+      "death_cause": "laika_bounce",
+      "full_searches": 77,
+      "result": "loss",
+      "seed": 993042
+    }
+  ],
+  "gate": {
+    "max_double_deaths": 1,
+    "max_nonwins": 3,
+    "min_wins": 297,
+    "passed": false,
+    "reason": "fourth non-win made 297/300 impossible"
+  },
+  "losses": 4,
+  "partial_jsonl": "training/analysis/runs/sparse_exact_safety_narrow_replan_unseen_3x100.json.partial.jsonl",
+  "pooled_search_frame_rate": 0.07968344412788857,
+  "results": {
+    "loss": 4,
+    "win": 148
+  },
+  "stopped_early": true,
+  "total_full_searches": 3776,
+  "total_policy_frames": 47385,
+  "total_simulated_frames": 7746480,
+  "win_rate_completed": 0.9736842105263158
+}
