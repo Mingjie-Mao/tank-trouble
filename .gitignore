@@ -15,8 +15,32 @@ training/models/*.pt
 training/score_data/
 training/value_data/
 training/survival_data/
+training/survival_data_v2/
+training/survival_distillability_data/
+training/survival_replica_530_data/
 training/opportunity_data/
 training/opportunity_data_v2/
 
 # 本地会话恢复档 (个人对话记录, 勿公开)
 restored_session_*.md
+
+# ---- 2026-08-07 归档补充 ----
+
+# 私人对话导出: 与 restored_session_*.md 同类, 含全部用户原话, 勿公开
+docs/CLAUDE_CODE_COMPLETE_CONTEXT.md
+
+# 第三方可执行文件 (他人作品, 非本项目产物)
+*.exe
+
+# 训练/蒸馏数据集 (可由脚本重新生成, 合计约 80MB)
+training/flywheel_value_data/
+training/killfield_p39_data/
+training/killfield_fast_data/
+training/killfield_full_data/
+training/killfield_distill_short/
+training/opponent_space_data/
+training/exploit_paths_backup/
+
+# 回放与实验产物
+training/*.npz
+training/logs/*.log

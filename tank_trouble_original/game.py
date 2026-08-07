@@ -268,6 +268,12 @@ class Bullet:
         self.lifetime = C.BULLETLIFETIME
         self.deadly = C.BULLETDEADLY
         self.removed = False
+        # 枪口出生点本就落在发射者自己的判定框内; 若坦克保持原方向前进,
+        # 子弹与坦克的分离速度被削弱到接近 0, 下一帧命中测试仍判在框内,
+        # 直线追着自己的子弹也会打死自己。豁免发射者直到子弹曾经离开过
+        # 自己的判定框一次 —— 跳弹几乎总是先飞出框外才弹回来, 所以这只
+        # 改变"直线追子弹"这一种场景, 跳弹自杀仍然按原样致命。
+        self.has_exited_owner = False
 
     def update(self):
         g = self.game
@@ -303,8 +309,12 @@ class Bullet:
         # 命中坦克 (bullet:90-104) — 原版无发射者豁免, 可命中自己!
         # 规则开关: self_harm_immune 里的坦克对自己的子弹免疫 (不自伤)。
         if self.deadly == 0:
+            if not self.has_exited_owner and not self.owner.point_in_shape(self.x, self.y):
+                self.has_exited_owner = True
             for i in range(g.tanks_count):
                 tank = g.tanks[i]
+                if tank is self.owner and not self.has_exited_owner:
+                    continue          # 直线追子弹豁免: 子弹还没离开过枪口判定框
                 if tank.alive and tank.point_in_shape(self.x, self.y):
                     if (tank is self.owner
                             and self.owner.number in g.self_harm_immune):

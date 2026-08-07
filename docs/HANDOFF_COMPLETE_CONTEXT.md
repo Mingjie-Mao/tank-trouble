@@ -14,8 +14,12 @@
 - `~/.claude/projects/-Users-cichlidfish-tank-trouble/18e1d260-a24f-4a2b-a2ef-9fc19ec57c86.jsonl`
   （2026-07-08 下午至当晚）
 
-仓库根目录的 `restored_session_20260705-0708.md` 是此前生成的可读恢复稿，但没有覆盖
-第二份会话后半段，因此本文件和 `training/EXPERIMENTS.md` 才是当前准确信息源。
+完整可见对话已统一导出到 `docs/CLAUDE_CODE_COMPLETE_CONTEXT.md`，覆盖上述两份会话，
+并保留后台任务通知中的实验结果。需要追溯用户原话、设计争论或实验过程时搜索该文件；
+当前结论仍以本文件和 `training/EXPERIMENTS.md` 为准。
+
+仓库根目录的 `restored_session_20260705-0708.md` 是早期恢复稿，只覆盖第一份会话且缺少
+后台任务通知。它仍可用于历史校验，但不再是主要恢复入口。
 
 ## 2. 项目最终目标
 
