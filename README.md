@@ -1,323 +1,355 @@
-# Tank Trouble：原版复刻与击败 Laika 的 AI
+[![English](https://img.shields.io/badge/ENGLISH-4285F4?style=for-the-badge)](README.md)
+[![中文](https://img.shields.io/badge/%E4%B8%AD%E6%96%87-555555?style=for-the-badge)](README.zh-CN.md)
 
-本项目从 Flash 反编译源码出发，用 Python 复刻 Tank Trouble 的迷宫、坦克、
-反弹弹道、回合计分和 Laika，并在原版规则下训练可部署策略。
+# Tank Trouble AI
 
-最终指标始终是**原版真胜率**：先击杀 Laika、随后被余弹击中属于双亡，不算胜利。
-训练课程可以改变规则，但不能替代原版验收。
+A line-by-line Python port of the Flash game **Tank Trouble**, and a full study of
+one question on top of it:
 
-## 当前结果
+> **Can an AI learn to beat a hand-written game AI on its own — how far can it get,
+> and which method actually works?**
 
-| 路线 | 代表 | 原版真胜率 | 状态 |
-| --- | --- | ---: | --- |
-| Laika 镜像 | Laika vs Laika | 40.2% | 行为基线 |
-| RL | P17 | 36.4% / 37.8% | RL 路线最佳 |
-| 评分蒸馏 | P21b | 62.2% / 63.8% | 1000/500 局双基 |
-| 专家迭代 | P22 iter02 | 约 68% | 前纯网络冠军 |
-| 生存课程学生 | P24v2.1 | 58.7% | 课程老师成功，旧蒸馏失败 |
-| **生存课程重蒸馏** | **P24v4** | **70.0%（80 局门测）** | **三轮 DAgger 进行中** |
-| **机会课程学生** | **P25v2 iter02** | **76.6%** | **当前最佳，1000 局新种子基线** |
-| 在线搜索老师 | P25v2 360° MPC | 98.0%（100 局） | 老师上限探针，不是部署模型 |
+The opponent is **Laika**, the original game's scripted bot (~980 lines, dodges every
+bullet, 10-frame decision cycle). It is strong: Laika mirrored against itself only
+scores **40.2%** true win rate, because in this game killing first is not the same as
+winning.
 
-P25v2 当前最佳的正式独立基线：
+The current deployed agent is a **pure feed-forward network with zero online search**
+that wins **88.7%** of games against Laika, at 8.6 ms per decision. A privileged
+offline search teacher reaches **99.0%**.
 
-- 1000 局，种子 `980000–980999`
-- 真胜率 **76.6%**
-- 负 16.8%，双亡 5.6%，平局 1.0%
-- 场均开火 2.7 发，命中率 14.3%，平均局长 22.2 秒
+Everything is reproducible: the engine is dependency-free Python, runs headless at
+6000+ frames/sec, and is seed-deterministic.
 
-模型晋升曲线为 66.2% → 70.0% → 80.0%（固定 80 局评测门），随后在独立
-200 局中得到 77.0%，在全新 1000 局中得到 76.6%。第二种子基复验仍建议补做。
+![P27b vs Laika](docs/demo.gif)
 
-## 当前最佳模型
+<sub>P27b (red) vs Laika (black), real speed, seeds 970005 / 970019 / 970004.
+Note the third round: the kill lands early and the rest is surviving its own
+bullets still in flight — that window is where 3–4% of games are still lost.</sub>
 
-```text
-training/models/best_model.pt
+---
+
+## Results
+
+| Track | Best agent | True win rate | Cost per decision | What it is |
+|---|---|---:|---:|---|
+| Model-free RL | P17 (BC + navigation + PPO) | 36.4% | 0.3 ms | Weights only; beats Laika net |
+| Decision-time search | MPC / hybrid K=12 | 96.0% | 91 / 36 ms | Rolls out live; the ceiling gauge |
+| **Fast network (deployed)** | **P27b** (P26 base + risk/value head) | **88.7%** | **8.6 ms** | **Zero online search** |
+| Privileged search | Exact-State Safety-Shielded MPC | 99.0% | seconds | Offline labeling teacher only |
+
+**Reference points:** random `0.5%` · hand-written hunter script `22.5%` ·
+**Laika vs. Laika `40.2%`**.
+
+<sub>P27b rating: 1000 games @seed 970000 = 88.2%, 500 games @seed 990000 = 89.6%
+(1330/1500 = 88.67%). Exact-state teacher: 120/120 on the fixed benchmark, 297/300
+on unseen seeds with 0 double-KOs. That teacher reads the engine's full internal
+state including RNG and Laika's hidden variables — it is a labeling oracle, not a
+playable agent, and 99% is not a claim about arbitrary unseen distributions.</sub>
+
+```
+0.5%  random
+22.5% hand-written hunter script
+36.4% P17 — end of the pure-RL line
+──────────────────────────────────── search enters
+96.0% MPC rollout search (no training at all)
+99.0% exact-state privileged teacher
+──────────────────────────────────── distillation back into a network
+ 8.9% P19  argmax behavior cloning     ← the tie trap
+62.2% P21b score regression, 408-dim observation
+74.7% P22  DAgger expert iteration
+76.9% P25v2 360° bounce-line teacher
+87.1% P26  amortized MPC
+88.7% P27b risk/value head  ← deployed champion
 ```
 
-它是 `p25v2_opportunity_best.pt` 的当前冠军快照。P22 仍单独保存在
-`training/models/scorenet_best.pt`，因为后续实验需要将它作为引导策略，不能覆盖。
+---
 
-P25v2 学生不是在线 MPC：部署时只有物理观测前端和一次评分网络前向，不比较
-候选动作的未来价值。但其 440 维观测包含 9 种移动的短物理预演，因此前端比 P22/P24
-学生更重；严格意义上属于“网络策略 + 确定性物理感知”，不是原始像素端到端模型。
+## Quickstart
 
-## 观看回放
-
-所有命令在仓库根目录运行。回放窗口按 `R` 更换地图。
-
-### 当前最佳 P25v2 学生：原版规则
+The game engine needs **nothing but Python 3** (tkinter for the window). Training
+needs `torch`, `stable-baselines3`, `gymnasium`.
 
 ```bash
-python3 training/watch.py --policy best
-```
-
-固定随机种子：
-
-```bash
-python3 training/watch.py --policy best --seed 980000
-```
-
-指定其他 P25v2 权重：
-
-```bash
-python3 training/watch.py --policy best \
-  --net training/models/p25v2_opportunity_iter01.pt
-```
-
-### P25v3 反演击杀场 MPC 老师：原版规则
-
-```bash
-python3 training/watch.py --policy p25v3-teacher --seed 984100
-```
-
-这是慢速在线老师：每次决策进行 MPC、反演射击格和弹道验证，不是最终学生。
-20 局机制探针为 90% 真胜、10% 双亡，95 次物理确认机会全部尝试开火。
-
-### P24v2.1 生存课程学生：回到原版规则
-
-```bash
-python3 training/watch.py --policy p24-student-original --seed 970000
-```
-
-### P24v2 风格生存老师：回到原版规则
-
-```bash
-python3 training/watch.py --policy p24-teacher-original --seed 970000
-```
-
-该老师仍用生存课程账本选择动作，但战斗规则为原版：Laika 可以被击杀，没有受击免疫。
-
-### P24v2 风格生存老师：生存课程规则
-
-```bash
-python3 training/watch.py --policy p24-teacher-survival --seed 970000
-```
-
-此模式中 Laika 无敌，我方一发即死，命中增加分数池；使用表现最好的 P24v2 规则，
-不包含后来失败的 2 秒受击免疫和空弹夹税。
-
-### P24v4 生存学生：原版规则
-
-```bash
-/opt/anaconda3/bin/python3 training/watch.py \
-  --policy p24v4-student-original --seed 970000
-```
-
-### P24v4 生存学生：生存课程规则
-
-```bash
-/opt/anaconda3/bin/python3 training/watch.py \
-  --policy p24v4-student-survival --seed 970000
-```
-
-### P24-P22 Replica-530 学生
-
-原版规则：
-
-```bash
-/opt/anaconda3/bin/python3 training/watch.py \
-  --policy p24r530-student-original --seed 970000
-```
-
-生存课程规则：
-
-```bash
-/opt/anaconda3/bin/python3 training/watch.py \
-  --policy p24r530-student-survival --seed 970000
-```
-
-该模型使用 P22 同型的 18 路联合动作评分网络；正式训练完成前，权重文件
-`training/models/p24r530_best.pt` 可能尚不存在。
-
-### 本地游玩
-
-```bash
+# Play it yourself
 python3 play_tank_trouble.py
 ```
 
-## 重新评测当前最佳
-
-Mac 长任务统一加 `caffeinate -i`，允许屏幕关闭但阻止系统因空闲休眠。
+```bash
+# Watch the current champion play Laika
+python3 training/watch.py --policy p27b     # network champion, real time (88.7%)
+python3 training/watch.py --policy exact    # search teacher, slow motion (99.0%)
+python3 training/watch.py --policy model    # RL-line champion P17 (36.4%)
+```
 
 ```bash
-caffeinate -i python3 training/opportunity_distill_v2.py eval \
-  --net training/models/best_model.pt \
-  --eval-n 1000 \
-  --eval-seed 990000 \
-  --workers 8
+# Official rating of the deployed champion (1000+ fresh seeds required)
+python3 training/p27_risk_value.py eval --n 1000 --seed 970000
+
+# Rate an RL-line agent (dual metric + behavior counters)
+python3 training/evaluate.py --policy model --model training/models/best_model.zip \
+  --n 1000 --seed 970000
 ```
-
-## P25v2 架构
-
-### 观测
-
-P25v2 使用 440 维输入：
-
-| 部分 | 维数 | 内容 |
-| --- | ---: | --- |
-| P21b 物理观测 | 408 | 坦克、子弹、迷宫、导航、弹道和动作条件物理事实 |
-| 当前机会状态 | 5 | 炮线质量、射击位进度、来弹风险、目标方向 |
-| 9 种移动预演 | 27 | 每种移动后的炮线变化、射击位变化和风险 |
-
-评分网络为三层 1024 宽 MLP，输出 18 个动作分数。部署时按 9 对“不开火/开火”
-分数选择移动；只有网络偏好开火且对准后的可信炮线不低于 0.58 时才允许开火。
-
-### 老师与数据
-
-P25v2 老师扫描坦克全部 32 个物理朝向，预测 75 帧、最多两次反弹。数据完全独立：
-
-1. 128 局老师分布；
-2. 128 局 P22 分布，由 P25v2 老师重标；
-3. 两轮各 128 局学生 on-policy DAgger；
-4. 每轮从全部聚合数据重新训练并通过固定评测门晋升。
-
-## P24v4 生存老师重蒸馏
-
-旧 P24 学生没有完整看到老师的覆盖账本，并把移动与开火压在同一个 18 动作回归头中。
-新管线位于 `training/survival_distill_v2.py`：
-
-- 530 维观测：408 物理状态 + 分数池/剩余时间 + 12×10 覆盖冷却图；
-- 移动与火控使用两个独立编码器，避免稀少开火事件破坏移动表征；
-- 9 路移动头用相对优势软排序，不再回归被公共生存基线支配的绝对分数；
-- 9 路条件开火头按学生最终选择的移动分支触发；
-- 开火正样本加权，并额外进行机会状态平衡重放；
-- 128 局老师 + 128 局 P22 引导 + 三轮各 128 局学生 DAgger；
-- 生存课程评测和原版真胜率评测同时保留。
-
-当前门测冠军为 `training/models/p24v4_survival_best.pt`：生存课程 40 局达到
-5.0 秒/中、卡墙 8.7%、风格 +0.07/秒；原版 80 局真胜率 70.0%、双亡 1.2%。
-这些仍是迭代门指标，第三轮 DAgger 和更大独立种子基线尚未完成。
-
-启动命令：
 
 ```bash
-caffeinate -i python3 training/survival_distill_v2.py pipeline --fresh \
-  --teacher-rounds 128 \
-  --bootstrap-rounds 128 \
-  --dagger-rounds 3 \
-  --rounds-per-dagger 128 \
-  --workers 8 \
-  --epochs 12 \
-  --gate-n 80 \
-  --survival-gate-n 40 \
-  --eval-n 200 \
-  --final-survival-n 80
+# Verify the port against the decompiled original (25 fidelity checks)
+python3 test_original_port.py
 ```
 
-新数据写入 `training/survival_data_v2/`，不会与旧 P24 数据混合。
-
-## 生存课程规则
-
-当前重蒸馏使用表现最好的 P24v2.1 规则：
-
-- Laika 无敌，我方一发即死；
-- 初始分数 100，每秒衰减 10；
-- 命中 Laika +50；
-- 净靠近一格 +3，远离会扣回，绕圈净额为零；
-- 首次或冷却后进入格子 +2，冷却 4 秒；
-- 卡墙额外 −5/秒；
-- 分数耗尽或死亡立即结束，死亡结算清零；
-- 最长 30 秒。
-
-失败的 P24v3“受击后 2 秒免疫 + 子弹穿透 + 空弹夹税”没有用于新训练。
-
-## 当前路线：exploit 搜索 → 对手建模 → 飞轮（2026-08-05）
-
-### 已判死的两条腿
-
-AlphaZero 式飞轮的两个主要杠杆，在这个游戏上都被实验否决：
-
-| 杠杆 | 结论 | 证据 |
-| --- | --- | --- |
-| V(s) 价值叶子 | ❌ | 六个受控消融，验证 R² 全在 0 附近或为负 |
-| 更深的搜索 | ❌ | horizon 72 vs 36 头对头 41.1% ± 12.9 |
-
-价值那条的消融链：自博弈对称结局（击杀 223:243、超时 226:226）方差 0.343
-仍 R² +0.017；网络 463k→6k 参数 R² 不动（排除过拟合）；按局内位置分桶，
-连最后 5% 帧 R² 也只有 0.109（排除"未来不确定"）；加入击杀场特征后
-R² 从 −0.013 掉到 −0.091（排除缺任务特征）。
-
-两个结果互相印证同一个游戏性质：**局面几乎不决定胜负**。一局由一次
-短促的反射性交锋决定，开火瞬间的几何一秒内就完全变了。这与围棋象棋那类
-"局面强烈决定结局、看得越远越强"的游戏不是一类。
-
-### 活下来的路线
-
-搜索的 rollout 里对手模型写死 `opp_model="L2"`（把所有人当 Laika），
-这是群友能稳定打赢它的根因。修这个不需要价值函数：
-
-```
-TAS 式存档回溯搜索  →  枚举出大量能杀死当前模型的时间线
-        ↓
-网络建模对手空间（对手 = Laika + 偏差，z 从实战推断）
-        ↓
-搜索的推演变准 → 搜索变强 → 旧 exploit 失效 → 再搜
-```
-
-每轮的新信息来自**新发现的打法**，不来自任何估计。技术前提是这个游戏
-确定性：(game, teacher) 一起 pickle 后回溯能逐位复现决策（54KB / 0.4ms）。
-
-以 Laika 为参照系而不是从零建模，因为对手模型跑在 rollout **里面**
-（一次决策约 90 次对手推理），必须是微秒级；且 `z=0` 时严格等于现状，
-遇到没见过的对手最坏退回今天的水平。
-
-### 规则
-
-30 秒（750 帧）结算；击杀并存活 = 1.0；超时按追猎链分裁决（领先 0.4 /
-落后 0.2）；双亡 0.1；自己死 0.0。超时对搜索算失败，要回溯。
-
-### 命令
+<details>
+<summary>Training the RL line from scratch</summary>
 
 ```bash
-# 地毯式 exploit 搜索（断点续跑，重启自动跳过已完成的图）
+# 1. Behavior-clone Laika as a prior
+python3 training/bc_laika.py --samples 800000 --epochs 12 --obs-nav
+
+# 2. Value warm-up + PPO fine-tune
+python3 training/train_ppo.py --steps 3000000 --envs 12 \
+  --reward-version 5 --obs-traj --obs-nav --min-spawn-dist 4 --bad-shot -0.45 \
+  --resume training/models/p15_bc_clone.zip --value-warmup 500000 \
+  --lr 1e-4 --ent-coef 0.003 --tag my_probe
+```
+
+~4400 steps/sec on one laptop; a 3M-step probe takes ~25 minutes. Prefix with
+`caffeinate -i` for background runs on macOS.
+</details>
+
+---
+
+## How it works
+
+### 1. Model-free RL topped out at 36.4%
+
+Eight consecutive reward-shaping variants after P8 all failed. The two changes that
+did move the number were both **observation** changes: trajectory prediction of
+incoming bullets (+8 points) and a shortest-path navigation direction (+3 points).
+
+> **Information > incentives > capacity.** "The agent can't learn it" was almost
+> always "the agent can't see it."
+
+Two hard limits fell out of this phase: a CNN map head lost badly to 4 hand-made
+navigation floats (P18 = 22.5%), and fine-tuning has an **effective window of about
+2M steps** — training longer at constant learning rate collapses (proven over 60M
+steps in P16).
+
+### 2. Decision-time search hit 96% with zero training
+
+A sandbox with no future-information leakage, rolling all 18 action combinations
+forward 48 frames, wins **96.0%** out of the box. Pruning to the top-K actions with
+the P17 network and then rolling deeper matched full search at 4.3× the speed
+(K=12, 36 ms/decision — real time).
+
+This reframed the whole project: **search is not a contestant.** It is a *gauge*
+for how much planning this game rewards, and a *teacher* that produces labels.
+
+### 3. Distillation puts search back into a network
+
+Cloning the teacher's argmax action fails (8.9%) because of the **tie trap**: when
+several actions are equally good, the argmax label picks randomly, so the labels
+contradict each other in exactly the states that matter.
+
+The fix is to regress the **outcome score of all 18 actions** — a value landscape,
+not one imitated move. That is P21b (62.2%), extended by DAgger expert iteration
+(P22, 74.7%), a bounce-line teacher (P25v2, 76.9%), amortized MPC (P26, 87.1%) and
+finally a risk/value head used as a **score adjustment rather than an action
+override** (P27b, 88.7%).
+
+Metric note: top-1 accuracy is mathematically useless here — the median label has
+14 of 18 actions tied, capping a perfect predictor at 11.9%. The right measure is
+**regret**: P21b picks a good-enough action in 93.6% of decisions, median regret 0.
+
+### 4. The privileged teacher (99%)
+
+Cloning the engine's *complete* state — RNG stream and Laika's hidden internals
+included (verified by fingerprinting 20 seeds × 20000 frames with zero mismatch) —
+plus a safety shield that refuses any predicted death or double-KO. This is the
+current labeling oracle, not something that can be deployed.
+
+---
+
+## The network
+
+![P21b score network architecture](docs/scorenet_arch.svg)
+
+The deployed champion is `p26_amortized_mpc_iter05.pt` (action-scoring base) plus
+`p27b_risk_value_iter00.pt` (risk/value head). Each frame is one forward pass and a
+deterministic re-ranking of actions — no rollouts. The diagram above shows the P21b
+ancestor that established the pattern: *predict the outcome of every candidate
+action, then risk-calibrate.*
+
+**408-dim input = every physical fact of the current frame** (facts only, no
+judgments, no future information):
+
+| Block | Dims | Contents |
+|---|---:|---|
+| Base observation | 125 | self 6 · enemy 8 (path distance, LOS) · 24 rays · 6×6 bullet slots · 6×4 trajectory prediction · 7×3 firing fan · navigation 4 · timers 2 |
+| ★ Action-conditioned rollout | 18 | each of 9 moves rolled 24 frames × [will I be hit?, in how many frames] |
+| Bullet slot extension | 24 | bullets 7–10 × 6 |
+| Full maze bitmap | 240 | 12×10 cells × [bottom wall, left wall] |
+| Wall-stuck flag | 1 | did the previous frame collide |
+
+The starred block is what made distillation work at all: the label asks *"where can
+I move and survive?"*, so action-conditioned information must exist in the input or
+the network cannot represent the ranking.
+
+**On size:** 1024×3, ~2.5M parameters, and it only grows when an experiment proves
+capacity is the bottleneck. Three controlled comparisons say it never was
+(two observation additions = +11 points; eight reward variants = 0; a much larger
+P21a network = +1%). No RNN or frame stacking, because under the fairness rules the
+teacher's label is a pure function of the current state.
+
+---
+
+## Measurement protocol
+
+These two rules cost the most to learn and are non-negotiable in this repo.
+
+1. **Killing first ≠ winning.** Under the original scoring, kill-then-die is a
+   double-KO and scores nothing. The naive "destroy" metric reads **15–29 points
+   too high**. Every public number here is true win rate; `evaluate.py` prints both.
+2. **100-game evaluations are noise.** The in-training callback has ±9 points of
+   systematic bias and is only good for trends. **A rating requires 1000+ fresh
+   seeds, and replacing the champion requires confirmation on a second seed base.**
+   P26 suppress-only looked like 90% over 40 games and collapsed to 84% over 300.
+
+---
+
+## What didn't work
+
+The negative results are the most transferable part of this project.
+
+| Attempt | Outcome | Why it failed |
+|---|---|---|
+| Reward engineering after P8 | 8 straight NO-GOs | Shaping saturated; single-behavior corrections break a converged policy's self-balance |
+| CNN map head (P18) | 22.5% | Lost to 4 hand-made navigation features |
+| 60M-step training (P16) | 36 → 30 → 21% | Fine-tuning window is ~2M steps at constant lr |
+| argmax behavior cloning (P19) | 8.9% | The tie trap |
+| Learning the value leaf (P23) | teacher 93.5 → 87.5% | Value leakage + on-policy value trap (froze in passivity) |
+| Survival curriculum (P24/v3) | teacher fine, student 58.7% | Curriculum score ≠ original score; 2s immunity outran the teacher's 48-frame horizon |
+| P27 macro-action head | 72.5% | Overriding actions interrupts an otherwise correct base policy |
+| P29/P29b/P29c distillation | rejected | Mixed label semantics — averaging h48/h72/h96 produces a smooth, indecisive target |
+| Exact-teacher distillation pilots | 3/3 rejected by the gate | Full-network fine-tuning destroys the champion's score calibration |
+| **A learned value function V(s)** | **6 controlled ablations, R² ≈ 0 or negative** | See below |
+| **Deeper search** | **h72 vs h36 head-to-head: 41.1% ± 12.9** | See below |
+
+The last two rows killed the two main levers of an AlphaZero-style flywheel, and
+they failed for the same reason. The value ablation chain: self-play with symmetric
+outcomes (kills 223:243, timeouts 226:226) and variance 0.343 still gives R² +0.017;
+shrinking the network 463k → 6k parameters doesn't move R² (rules out overfitting);
+bucketing by position within the round leaves R² at only 0.109 even in the final 5%
+of frames (rules out "the future is just uncertain"); adding kill-field features
+*drops* R² from −0.013 to −0.091 (rules out missing task features).
+
+> **Position barely determines the outcome in this game.** A round is decided by one
+> short reflexive exchange, and the geometry at the moment of firing changes
+> completely within a second. This is not a game in the chess/Go family, where
+> position strongly predicts the result and seeing further makes you stronger.
+
+---
+
+## Known limitations
+
+- **The distillation gap is the main open problem.** Teacher 99% → network 88.7%,
+  and the 11 points are *not* a data-volume issue: the exact teacher decides using
+  RNG and Laika's hidden state, which the observation does not contain. The
+  distillation is not information-closed.
+- **Behavior quality lags the win rate.** Over 300 games the observer still counts
+  ~3400 `missed_fire_window` and ~2100 `stutter_stall` events. A memoryless
+  per-frame network cannot commit to a path.
+- **Double-KOs are the main residual loss mode** — 3.2% / 4.2% for P27b.
+- **99% does not extrapolate.** It holds on the fixed benchmark; three unseen seeds
+  are still clear losses. This game is not "solved."
+- **One opponent only.** Everything trains and evaluates against Laika. Whether the
+  game is defense-favored needs self-play between two strong agents, which does not
+  exist yet.
+- **Engineering debt.** `EXPERIMENTS.md` stops at P25 (P26–P30 live in
+  `analysis/*.md`), `models/` is gitignored so the champion is not reproducible off
+  this machine, and there are 30+ one-off `run_*.sh` scripts.
+
+---
+
+## Current front: exploit search → opponent modeling → flywheel
+
+With both flywheel levers dead, the live line attacks a different weakness. Inside
+the search rollouts the opponent model is hard-coded to `opp_model="L2"` — it treats
+*everyone* as Laika. That is exactly why human players can beat the agent
+reliably, and fixing it needs no value function:
+
+```
+TAS-style save/restore backtracking search
+        ↓  enumerates timelines that kill the current model
+model the opponent space with a network (opponent = Laika + deviation,
+        z inferred from real games)
+        ↓  rollouts get accurate → search gets stronger
+old exploits stop working → search again
+```
+
+Every round's new information comes from **newly discovered play**, not from any
+estimate. The technical precondition is determinism: pickling `(game, teacher)`
+together and replaying reproduces decisions bit-for-bit (54 KB / 0.4 ms).
+
+Laika is the reference frame rather than a from-scratch model because the opponent
+model runs *inside* the rollout (~90 opponent inferences per decision), so it has
+to be microsecond-scale — and at `z=0` it is exactly today's behavior, so an unseen
+opponent degrades at worst to the current level.
+
+**Arena rules** (search evaluation, distinct from the original scoring): 30 s
+(750 frames); kill and survive = 1.0; on timeout the hunt-chain score decides
+(ahead 0.4 / behind 0.2); double-KO 0.1; own death 0.0. A timeout counts as a
+failure for the search and gets backtracked.
+
+```bash
+# Carpet exploit search (resumable — restarts skip finished maps)
 caffeinate -i python3 training/exploit_search.py run --maps 64 --workers 8
 
-# 回放搜索出来的击杀路径
+# Replay a kill path the search found
 python3 training/watch.py --policy exploit-replay
 
-# 新规则擂台
+# Head-to-head arena under the new rules
 python3 training/watch.py --policy arena --ranked --seed 40000000
 ```
 
-## 项目结构
+Full front-by-front plans are in
+[docs/PROJECT_REVIEW_2026-08-04.md](docs/PROJECT_REVIEW_2026-08-04.md); the
+P26–P41 exploration line is archived under `docs/P26_*` … `docs/P41_*`.
 
-```text
-README.md                              当前总览与回放命令
-play_tank_trouble.py                   本地游玩
-tank_trouble_original/                 原版 Python 复刻
-training/
-├── evaluate.py                        原版双口径评测
-├── mpc_agent.py                       48 帧 MPC 基础老师
-├── score_distill.py                   P21b 评分网络
-├── expert_iter.py                     P22 专家迭代
-├── survival_mode.py                   P24 生存课程
-├── survival_distill.py                P24v2.1 旧蒸馏
-├── survival_distill_v2.py             P24v4 双头 + 完整账本 + DAgger
-├── opportunity_distill.py             P25v1 机会课程
-├── opportunity_teacher_v2.py          P25v2 360°老师
-├── opportunity_distill_v2.py          P25v2 独立蒸馏与 DAgger
-├── opportunity_teacher_v3.py          P25v3 反演击杀场老师
-├── watch.py                           统一回放入口
-├── EXPERIMENTS.md                     完整实验台账
-└── models/                            本地模型产物，不进入 Git
-docs/
-├── HANDOFF_COMPLETE_CONTEXT.md        当前结论与跨会话恢复
-├── CLAUDE_CODE_COMPLETE_CONTEXT.md    两份 Claude Code 可见对话全文
-├── REPORT.md                          项目叙事
-└── PORT_NOTES.md                      Flash 到 Python 的移植依据
-tools/export_claude_dialogue.py        重新导出 Claude 会话上下文
+---
+
+## Repo layout
+
+```
+play_tank_trouble.py      Play locally (tkinter)
+test_original_port.py     25 fidelity checks against the decompiled original
+tank_trouble_original/    The game itself — 1:1 port, do not change the logic
+swf_decompiled/           Decompiled ActionScript, the source of truth for the port
+docs/                     REPORT (narrative) · PAPER · PORT_NOTES (fidelity)
+                          GAME_MECHANICS_ANALYSIS · PROJECT_REVIEW · scorenet_arch.svg
+training/                 Core modules stay at the package root (import chain +
+│                         saved-model references depend on it)
+├── tt_gym_env.py         Env: rewards v1–v5, observations 76/121/125/408/Dict
+├── mpc_agent.py          Search: leak-free sandbox + MPC rollouts (96.0%)
+├── hybrid_agent.py       Search: network-pruned hybrid (K=12, 96.0% @36 ms)
+├── exact_state.py        Full engine-state clone incl. RNG
+├── exact_state_mpc_teacher.py   The 99% privileged teacher
+├── p26_amortized_mpc.py  Deployed action-scoring base
+├── p27_risk_value.py     Deployed risk/value head
+├── score_distill.py      Score distillation (P21b) | expert_iter.py DAgger (P22)
+├── train_ppo.py          RL line: PPO | bc_laika.py behavior cloning
+├── evaluate.py           Dual-metric rating | watch.py replay | baselines.py
+├── EXPERIMENTS.md        Full experiment ledger
+├── analysis/             Result write-ups and mining tools
+├── logs/                 All historical logs (kept as evidence)
+└── models/               Weights (gitignored)
 ```
 
-训练数据、`.pt`/`.zip` 模型和本机会话原始文件均不进入 Git。
+---
 
-## 测量纪律
+## Game mechanics in 30 seconds
 
-1. 原版真胜率是最终标准，双亡不算胜利。
-2. 80/100/200 局只能作为评测门或机制探针。
-3. 正式结果至少使用 1000 局全新种子，换冠军建议补第二种子基。
-4. 老师表现好不代表学生已经蒸馏成功；必须分别报告老师、课程学生和原版学生。
-5. 同维度但语义不同的数据禁止混合。
+25 FPS · maze randomized per round (4–12 × 4–10 cells) · bullets step 7 substeps per
+frame, bounce off walls, live 250 frames and **can kill their owner** · 5-round
+magazine · scoring resolves 125 frames after a death, which is what creates the
+double-KO window · Laika is a priority-list scripted AI that dodges every bullet.
 
-更完整的实验数字、失败路线和当前训练状态见 `training/EXPERIMENTS.md`；跨会话恢复先读
-`docs/HANDOFF_COMPLETE_CONTEXT.md`。
+Fidelity details — including AS2 quirks like `undefined == 0` and NaN propagation —
+are in [docs/PORT_NOTES.md](docs/PORT_NOTES.md).
