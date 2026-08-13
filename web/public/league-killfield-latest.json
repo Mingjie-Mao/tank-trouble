@@ -1,0 +1,425 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-12T15:45:27.485Z",
+  "candidate": "killfield-js",
+  "roundsPerSide": 3,
+  "seed": 1100000,
+  "maxFrames": 3000,
+  "overall": {
+    "games": 24,
+    "win": 14,
+    "loss": 2,
+    "double_death": 1,
+    "draw": 7,
+    "winRate": 0.5833333333333334,
+    "nonLossRate": 0.9166666666666666,
+    "colorGap": 0,
+    "bySide": {
+      "left": {
+        "games": 12,
+        "wins": 7,
+        "winRate": 0.5833333333333334
+      },
+      "right": {
+        "games": 12,
+        "wins": 7,
+        "winRate": 0.5833333333333334
+      }
+    },
+    "averageRoundFrames": 1029.5,
+    "p95DecisionMs": 5.915750000000116,
+    "elapsedMs": 52248.68729
+  },
+  "opponents": {
+    "laika-js": {
+      "games": 6,
+      "win": 4,
+      "loss": 2,
+      "double_death": 0,
+      "draw": 0,
+      "winRate": 0.6666666666666666,
+      "nonLossRate": 0.6666666666666666,
+      "colorGap": 0,
+      "bySide": {
+        "left": {
+          "games": 3,
+          "wins": 2,
+          "winRate": 0.6666666666666666
+        },
+        "right": {
+          "games": 3,
+          "wins": 2,
+          "winRate": 0.6666666666666666
+        }
+      },
+      "averageRoundFrames": 133,
+      "p95DecisionMs": 5.505208000000039,
+      "elapsedMs": 1488.139416
+    },
+    "hunter-js": {
+      "games": 6,
+      "win": 3,
+      "loss": 0,
+      "double_death": 1,
+      "draw": 2,
+      "winRate": 0.5,
+      "nonLossRate": 1,
+      "colorGap": 0.3333333333333333,
+      "bySide": {
+        "left": {
+          "games": 3,
+          "wins": 1,
+          "winRate": 0.3333333333333333
+        },
+        "right": {
+          "games": 3,
+          "wins": 2,
+          "winRate": 0.6666666666666666
+        }
+      },
+      "averageRoundFrames": 1181.8333333333333,
+      "p95DecisionMs": 5.020375000000058,
+      "elapsedMs": 7575.856750000003
+    },
+    "dodger-js": {
+      "games": 6,
+      "win": 1,
+      "loss": 0,
+      "double_death": 0,
+      "draw": 5,
+      "winRate": 0.16666666666666666,
+      "nonLossRate": 1,
+      "colorGap": 0.3333333333333333,
+      "bySide": {
+        "left": {
+          "games": 3,
+          "wins": 1,
+          "winRate": 0.3333333333333333
+        },
+        "right": {
+          "games": 3,
+          "wins": 0,
+          "winRate": 0
+        }
+      },
+      "averageRoundFrames": 2527.6666666666665,
+      "p95DecisionMs": 4.189791000000696,
+      "elapsedMs": 40482.604083000006
+    },
+    "random-js": {
+      "games": 6,
+      "win": 6,
+      "loss": 0,
+      "double_death": 0,
+      "draw": 0,
+      "winRate": 1,
+      "nonLossRate": 1,
+      "colorGap": 0,
+      "bySide": {
+        "left": {
+          "games": 3,
+          "wins": 3,
+          "winRate": 1
+        },
+        "right": {
+          "games": 3,
+          "wins": 3,
+          "winRate": 1
+        }
+      },
+      "averageRoundFrames": 275.5,
+      "p95DecisionMs": 5.900707999993756,
+      "elapsedMs": 2702.087040999999
+    }
+  },
+  "games": [
+    {
+      "candidate": "killfield-js",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "seed": 1100000,
+      "outcome": "win",
+      "winner": 0,
+      "frames": 108,
+      "elapsedMs": 287.685208,
+      "candidateDecisionP50Ms": 2.1205409999999887,
+      "candidateDecisionP95Ms": 5.459708000000006
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "laika-js",
+      "candidateSide": 1,
+      "seed": 1100000,
+      "outcome": "loss",
+      "winner": 0,
+      "frames": 149,
+      "elapsedMs": 228.01250000000005,
+      "candidateDecisionP50Ms": 0.0072499999999990905,
+      "candidateDecisionP95Ms": 7.0206249999999955
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "seed": 1100001,
+      "outcome": "win",
+      "winner": 0,
+      "frames": 134,
+      "elapsedMs": 326.751583,
+      "candidateDecisionP50Ms": 2.049541999999974,
+      "candidateDecisionP95Ms": 5.395250000000033
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "laika-js",
+      "candidateSide": 1,
+      "seed": 1100001,
+      "outcome": "win",
+      "winner": 1,
+      "frames": 138,
+      "elapsedMs": 364.04762500000004,
+      "candidateDecisionP50Ms": 2.3954160000000684,
+      "candidateDecisionP95Ms": 5.505208000000039
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "seed": 1100002,
+      "outcome": "loss",
+      "winner": 1,
+      "frames": 143,
+      "elapsedMs": 68.72649999999999,
+      "candidateDecisionP50Ms": 0.0008749999999508873,
+      "candidateDecisionP95Ms": 3.2207499999999527
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "laika-js",
+      "candidateSide": 1,
+      "seed": 1100002,
+      "outcome": "win",
+      "winner": 1,
+      "frames": 126,
+      "elapsedMs": 212.91599999999994,
+      "candidateDecisionP50Ms": 1.0272500000000946,
+      "candidateDecisionP95Ms": 4.756875000000036
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "hunter-js",
+      "candidateSide": 0,
+      "seed": 1200000,
+      "outcome": "win",
+      "winner": 0,
+      "frames": 160,
+      "elapsedMs": 278.5913330000001,
+      "candidateDecisionP50Ms": 1.4636250000000928,
+      "candidateDecisionP95Ms": 4.01341699999989
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "hunter-js",
+      "candidateSide": 1,
+      "seed": 1200000,
+      "outcome": "double_death",
+      "winner": null,
+      "frames": 268,
+      "elapsedMs": 228.50320899999997,
+      "candidateDecisionP50Ms": 0.00029200000017226557,
+      "candidateDecisionP95Ms": 4.246582999999873
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "hunter-js",
+      "candidateSide": 0,
+      "seed": 1200001,
+      "outcome": "draw",
+      "winner": null,
+      "frames": 3000,
+      "elapsedMs": 2831.066083,
+      "candidateDecisionP50Ms": 0.05437500000016371,
+      "candidateDecisionP95Ms": 3.4703329999993002
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "hunter-js",
+      "candidateSide": 1,
+      "seed": 1200001,
+      "outcome": "win",
+      "winner": 1,
+      "frames": 272,
+      "elapsedMs": 495.1502500000006,
+      "candidateDecisionP50Ms": 0.40737500000068394,
+      "candidateDecisionP95Ms": 5.512582999999722
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "hunter-js",
+      "candidateSide": 0,
+      "seed": 1200002,
+      "outcome": "draw",
+      "winner": null,
+      "frames": 3000,
+      "elapsedMs": 3004.1605,
+      "candidateDecisionP50Ms": 0.0070420000001831795,
+      "candidateDecisionP95Ms": 3.5375420000000304
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "hunter-js",
+      "candidateSide": 1,
+      "seed": 1200002,
+      "outcome": "win",
+      "winner": 1,
+      "frames": 391,
+      "elapsedMs": 738.3853750000017,
+      "candidateDecisionP50Ms": 0.38329199999861885,
+      "candidateDecisionP95Ms": 5.020375000000058
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "dodger-js",
+      "candidateSide": 0,
+      "seed": 1300000,
+      "outcome": "win",
+      "winner": 0,
+      "frames": 166,
+      "elapsedMs": 212.78029099999912,
+      "candidateDecisionP50Ms": 0.4309580000008282,
+      "candidateDecisionP95Ms": 4.189791000000696
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "dodger-js",
+      "candidateSide": 1,
+      "seed": 1300000,
+      "outcome": "draw",
+      "winner": null,
+      "frames": 3000,
+      "elapsedMs": 9552.315750000002,
+      "candidateDecisionP50Ms": 2.9673750000001746,
+      "candidateDecisionP95Ms": 3.0911249999990105
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "dodger-js",
+      "candidateSide": 0,
+      "seed": 1300001,
+      "outcome": "draw",
+      "winner": null,
+      "frames": 3000,
+      "elapsedMs": 3024.387083999998,
+      "candidateDecisionP50Ms": 0.05699999999706051,
+      "candidateDecisionP95Ms": 3.787499999998545
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "dodger-js",
+      "candidateSide": 1,
+      "seed": 1300001,
+      "outcome": "draw",
+      "winner": null,
+      "frames": 3000,
+      "elapsedMs": 11512.017416000002,
+      "candidateDecisionP50Ms": 3.7001670000026934,
+      "candidateDecisionP95Ms": 3.843249999998079
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "dodger-js",
+      "candidateSide": 0,
+      "seed": 1300002,
+      "outcome": "draw",
+      "winner": null,
+      "frames": 3000,
+      "elapsedMs": 13359.612916999999,
+      "candidateDecisionP50Ms": 4.978458000005048,
+      "candidateDecisionP95Ms": 5.915750000000116
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "dodger-js",
+      "candidateSide": 1,
+      "seed": 1300002,
+      "outcome": "draw",
+      "winner": null,
+      "frames": 3000,
+      "elapsedMs": 2821.490625000006,
+      "candidateDecisionP50Ms": 0.06783299999369774,
+      "candidateDecisionP95Ms": 3.475749999997788
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "random-js",
+      "candidateSide": 0,
+      "seed": 1400000,
+      "outcome": "win",
+      "winner": 0,
+      "frames": 268,
+      "elapsedMs": 495.62924999999814,
+      "candidateDecisionP50Ms": 0.4291250000023865,
+      "candidateDecisionP95Ms": 5.968667000001005
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "random-js",
+      "candidateSide": 1,
+      "seed": 1400000,
+      "outcome": "win",
+      "winner": 1,
+      "frames": 140,
+      "elapsedMs": 362.45866599999863,
+      "candidateDecisionP50Ms": 2.090457999998762,
+      "candidateDecisionP95Ms": 5.5723749999961
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "random-js",
+      "candidateSide": 0,
+      "seed": 1400001,
+      "outcome": "win",
+      "winner": 0,
+      "frames": 572,
+      "elapsedMs": 1006.6251249999987,
+      "candidateDecisionP50Ms": 0.054875000001629815,
+      "candidateDecisionP95Ms": 5.694875000001048
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "random-js",
+      "candidateSide": 1,
+      "seed": 1400001,
+      "outcome": "win",
+      "winner": 1,
+      "frames": 201,
+      "elapsedMs": 264.5616250000021,
+      "candidateDecisionP50Ms": 0.05966700000135461,
+      "candidateDecisionP95Ms": 5.900707999993756
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "random-js",
+      "candidateSide": 0,
+      "seed": 1400002,
+      "outcome": "win",
+      "winner": 0,
+      "frames": 91,
+      "elapsedMs": 90.51337500000227,
+      "candidateDecisionP50Ms": 0.05695900000137044,
+      "candidateDecisionP95Ms": 4.014957999999751
+    },
+    {
+      "candidate": "killfield-js",
+      "opponent": "random-js",
+      "candidateSide": 1,
+      "seed": 1400002,
+      "outcome": "win",
+      "winner": 1,
+      "frames": 381,
+      "elapsedMs": 482.29899999999907,
+      "candidateDecisionP50Ms": 0.07187499999417923,
+      "candidateDecisionP95Ms": 5.662916999994195
+    }
+  ]
+}
