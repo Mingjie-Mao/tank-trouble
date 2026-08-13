@@ -10,6 +10,8 @@ const policy = process.argv[5] ?? "killfield-js";
 const output = process.argv[6] ?? null;
 const counts = { win: 0, loss: 0, double_death: 0, draw: 0 };
 let totalFrames = 0;
+let totalPriorCalls = 0;
+let totalPriorCandidates = 0;
 const decisionMs = [];
 const games = [];
 const started = performance.now();
@@ -37,7 +39,16 @@ for (let index = 0; index < rounds; index += 1) {
   }
   counts[result] += 1;
   totalFrames += frames;
-  games.push({ seed: seed + index, result, frames });
+  const telemetry = arena.leftAgent?.telemetry?.() ?? {};
+  totalPriorCalls += telemetry.priorCalls ?? 0;
+  totalPriorCandidates += telemetry.priorCandidates ?? 0;
+  games.push({
+    seed: seed + index,
+    result,
+    frames,
+    priorCalls: telemetry.priorCalls ?? 0,
+    priorCandidates: telemetry.priorCandidates ?? 0,
+  });
   if ((index + 1) % 10 === 0 || index + 1 === rounds) {
     console.log(`  ${index + 1}/${rounds}  wins ${counts.win}`);
   }
@@ -49,6 +60,9 @@ console.log(`===== Browser JS ${policy}: ${rounds} games @${seed} (${elapsed.toF
 console.log(`  true win ${pct(counts.win)}  loss ${pct(counts.loss)}  double death ${pct(counts.double_death)}  draw ${pct(counts.draw)}`);
 console.log(`  avg length ${(totalFrames / rounds / 25).toFixed(1)}s  throughput ${(totalFrames / elapsed).toFixed(0)} frames/s`);
 console.log(`  decision p50 ${percentile(decisionMs, 0.5).toFixed(3)}ms  p95 ${percentile(decisionMs, 0.95).toFixed(3)}ms  p99 ${percentile(decisionMs, 0.99).toFixed(3)}ms`);
+if (totalPriorCalls > 0) {
+  console.log(`  prior rollouts ${(totalPriorCandidates / totalPriorCalls).toFixed(2)}/10  saved ${((1 - totalPriorCandidates / totalPriorCalls / 10) * 100).toFixed(1)}%`);
+}
 
 if (output !== null) {
   const report = {
@@ -63,6 +77,7 @@ if (output !== null) {
     doubleDeathRate: counts.double_death / rounds,
     drawRate: counts.draw / rounds,
     averageFrames: totalFrames / rounds,
+    meanPriorCandidates: totalPriorCandidates / Math.max(1, totalPriorCalls),
     decisionP50Ms: percentile(decisionMs, 0.5),
     decisionP95Ms: percentile(decisionMs, 0.95),
     decisionP99Ms: percentile(decisionMs, 0.99),

@@ -1,0 +1,337 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-13T03:56:55.875Z",
+  "champion": "p27-js-tactical-v2",
+  "immutableSeedPolicy": "append-only after validation; never tune against one seed",
+  "sourceReports": [
+    "/tmp/tactical-final-pool-2500000.json",
+    "/tmp/tactical-final-pool-2510000.json"
+  ],
+  "counts": {
+    "total": 24,
+    "hardCases": 8,
+    "slowWins": 16
+  },
+  "cases": [
+    {
+      "key": "dodger-js:0:2700002",
+      "opponent": "dodger-js",
+      "candidateSide": 0,
+      "seed": 2700002,
+      "baselineOutcome": "win",
+      "baselineFrames": 88,
+      "baselineP95DecisionMs": 6.048540999996476,
+      "tags": [
+        "hard-case",
+        "double_death"
+      ],
+      "source": "/tmp/tactical-final-pool-2500000.json"
+    },
+    {
+      "key": "dodger-js:0:2710000",
+      "opponent": "dodger-js",
+      "candidateSide": 0,
+      "seed": 2710000,
+      "baselineOutcome": "win",
+      "baselineFrames": 980,
+      "baselineP95DecisionMs": 8.035999999992782,
+      "tags": [
+        "slow-win"
+      ],
+      "source": "/tmp/tactical-final-pool-2510000.json"
+    },
+    {
+      "key": "dodger-js:0:2710002",
+      "opponent": "dodger-js",
+      "candidateSide": 0,
+      "seed": 2710002,
+      "baselineOutcome": "win",
+      "baselineFrames": 943,
+      "baselineP95DecisionMs": 22.368124999993597,
+      "tags": [
+        "slow-win"
+      ],
+      "source": "/tmp/tactical-final-pool-2510000.json"
+    },
+    {
+      "key": "dodger-js:0:2710003",
+      "opponent": "dodger-js",
+      "candidateSide": 0,
+      "seed": 2710003,
+      "baselineOutcome": "win",
+      "baselineFrames": 784,
+      "baselineP95DecisionMs": 26.264916999993147,
+      "tags": [
+        "slow-win"
+      ],
+      "source": "/tmp/tactical-final-pool-2510000.json"
+    },
+    {
+      "key": "dodger-js:0:2710009",
+      "opponent": "dodger-js",
+      "candidateSide": 0,
+      "seed": 2710009,
+      "baselineOutcome": "win",
+      "baselineFrames": 1397,
+      "baselineP95DecisionMs": 10.716958000004524,
+      "tags": [
+        "slow-win"
+      ],
+      "source": "/tmp/tactical-final-pool-2510000.json"
+    },
+    {
+      "key": "dodger-js:1:2700000",
+      "opponent": "dodger-js",
+      "candidateSide": 1,
+      "seed": 2700000,
+      "baselineOutcome": "win",
+      "baselineFrames": 929,
+      "baselineP95DecisionMs": 8.817375000013271,
+      "tags": [
+        "slow-win"
+      ],
+      "source": "/tmp/tactical-final-pool-2500000.json"
+    },
+    {
+      "key": "dodger-js:1:2700004",
+      "opponent": "dodger-js",
+      "candidateSide": 1,
+      "seed": 2700004,
+      "baselineOutcome": "win",
+      "baselineFrames": 791,
+      "baselineP95DecisionMs": 7.534417000017129,
+      "tags": [
+        "slow-win"
+      ],
+      "source": "/tmp/tactical-final-pool-2500000.json"
+    },
+    {
+      "key": "dodger-js:1:2700012",
+      "opponent": "dodger-js",
+      "candidateSide": 1,
+      "seed": 2700012,
+      "baselineOutcome": "win",
+      "baselineFrames": 776,
+      "baselineP95DecisionMs": 8.067374999984168,
+      "tags": [
+        "slow-win"
+      ],
+      "source": "/tmp/tactical-final-pool-2500000.json"
+    },
+    {
+      "key": "dodger-js:1:2710007",
+      "opponent": "dodger-js",
+      "candidateSide": 1,
+      "seed": 2710007,
+      "baselineOutcome": "win",
+      "baselineFrames": 749,
+      "baselineP95DecisionMs": 8.723583000013605,
+      "tags": [
+        "slow-win"
+      ],
+      "source": "/tmp/tactical-final-pool-2510000.json"
+    },
+    {
+      "key": "hunter-js:0:2600009",
+      "opponent": "hunter-js",
+      "candidateSide": 0,
+      "seed": 2600009,
+      "baselineOutcome": "loss",
+      "baselineFrames": 487,
+      "baselineP95DecisionMs": 8.630583999998635,
+      "tags": [
+        "hard-case",
+        "loss"
+      ],
+      "source": "/tmp/tactical-final-pool-2500000.json"
+    },
+    {
+      "key": "hunter-js:0:2600010",
+      "opponent": "hunter-js",
+      "candidateSide": 0,
+      "seed": 2600010,
+      "baselineOutcome": "draw",
+      "baselineFrames": 3000,
+      "baselineP95DecisionMs": 7.588750000009895,
+      "tags": [
+        "hard-case",
+        "draw"
+      ],
+      "source": "/tmp/tactical-final-pool-2500000.json"
+    },
+    {
+      "key": "hunter-js:0:2600012",
+      "opponent": "hunter-js",
+      "candidateSide": 0,
+      "seed": 2600012,
+      "baselineOutcome": "draw",
+      "baselineFrames": 3000,
+      "baselineP95DecisionMs": 6.97383400000399,
+      "tags": [
+        "hard-case",
+        "draw"
+      ],
+      "source": "/tmp/tactical-final-pool-2500000.json"
+    },
+    {
+      "key": "hunter-js:0:2610001",
+      "opponent": "hunter-js",
+      "candidateSide": 0,
+      "seed": 2610001,
+      "baselineOutcome": "draw",
+      "baselineFrames": 3000,
+      "baselineP95DecisionMs": 9.587541000000783,
+      "tags": [
+        "hard-case",
+        "draw"
+      ],
+      "source": "/tmp/tactical-final-pool-2510000.json"
+    },
+    {
+      "key": "hunter-js:0:2610011",
+      "opponent": "hunter-js",
+      "candidateSide": 0,
+      "seed": 2610011,
+      "baselineOutcome": "win",
+      "baselineFrames": 1162,
+      "baselineP95DecisionMs": 6.339916999990237,
+      "tags": [
+        "slow-win"
+      ],
+      "source": "/tmp/tactical-final-pool-2510000.json"
+    },
+    {
+      "key": "hunter-js:1:2600006",
+      "opponent": "hunter-js",
+      "candidateSide": 1,
+      "seed": 2600006,
+      "baselineOutcome": "win",
+      "baselineFrames": 955,
+      "baselineP95DecisionMs": 10.827957999994396,
+      "tags": [
+        "slow-win"
+      ],
+      "source": "/tmp/tactical-final-pool-2500000.json"
+    },
+    {
+      "key": "hunter-js:1:2600007",
+      "opponent": "hunter-js",
+      "candidateSide": 1,
+      "seed": 2600007,
+      "baselineOutcome": "win",
+      "baselineFrames": 824,
+      "baselineP95DecisionMs": 10.247999999992317,
+      "tags": [
+        "slow-win"
+      ],
+      "source": "/tmp/tactical-final-pool-2500000.json"
+    },
+    {
+      "key": "laika-js:0:2500000",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "seed": 2500000,
+      "baselineOutcome": "win",
+      "baselineFrames": 1114,
+      "baselineP95DecisionMs": 11.123082999999951,
+      "tags": [
+        "slow-win"
+      ],
+      "source": "/tmp/tactical-final-pool-2500000.json"
+    },
+    {
+      "key": "laika-js:0:2500001",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "seed": 2500001,
+      "baselineOutcome": "win",
+      "baselineFrames": 1120,
+      "baselineP95DecisionMs": 12.611750000000029,
+      "tags": [
+        "slow-win"
+      ],
+      "source": "/tmp/tactical-final-pool-2500000.json"
+    },
+    {
+      "key": "laika-js:0:2500003",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "seed": 2500003,
+      "baselineOutcome": "win",
+      "baselineFrames": 911,
+      "baselineP95DecisionMs": 9.508874999999534,
+      "tags": [
+        "slow-win"
+      ],
+      "source": "/tmp/tactical-final-pool-2500000.json"
+    },
+    {
+      "key": "laika-js:0:2500006",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "seed": 2500006,
+      "baselineOutcome": "win",
+      "baselineFrames": 821,
+      "baselineP95DecisionMs": 12.0681250000016,
+      "tags": [
+        "slow-win"
+      ],
+      "source": "/tmp/tactical-final-pool-2500000.json"
+    },
+    {
+      "key": "laika-js:0:2500007",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "seed": 2500007,
+      "baselineOutcome": "draw",
+      "baselineFrames": 3000,
+      "baselineP95DecisionMs": 9.28887499999837,
+      "tags": [
+        "hard-case",
+        "draw"
+      ],
+      "source": "/tmp/tactical-final-pool-2500000.json"
+    },
+    {
+      "key": "laika-js:0:2510004",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "seed": 2510004,
+      "baselineOutcome": "win",
+      "baselineFrames": 1246,
+      "baselineP95DecisionMs": 13.186541999999463,
+      "tags": [
+        "slow-win"
+      ],
+      "source": "/tmp/tactical-final-pool-2510000.json"
+    },
+    {
+      "key": "laika-js:1:2500001",
+      "opponent": "laika-js",
+      "candidateSide": 1,
+      "seed": 2500001,
+      "baselineOutcome": "double_death",
+      "baselineFrames": 253,
+      "baselineP95DecisionMs": 8.106957999998485,
+      "tags": [
+        "hard-case",
+        "double_death"
+      ],
+      "source": "/tmp/tactical-final-pool-2500000.json"
+    },
+    {
+      "key": "laika-js:1:2510003",
+      "opponent": "laika-js",
+      "candidateSide": 1,
+      "seed": 2510003,
+      "baselineOutcome": "win",
+      "baselineFrames": 96,
+      "baselineP95DecisionMs": 51.576500000000124,
+      "tags": [
+        "hard-case",
+        "double_death"
+      ],
+      "source": "/tmp/tactical-final-pool-2510000.json"
+    }
+  ]
+}

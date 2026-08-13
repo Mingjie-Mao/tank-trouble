@@ -9,7 +9,10 @@ import { ConsensusSafetyAgent } from "./consensus-safety-agent.js";
 import { TwoStageSearchAgent } from "./two-stage-search-agent.js";
 import { ShadowCorrectionAgent } from "./shadow-correction-agent.js";
 import { TacticalSafetyAgent } from "./tactical-safety-agent.js";
-import { TacticalV2Agent } from "./tactical-v2-agent.js";
+import { TacticalCandidateAgent } from "./tactical-candidate-agent.js";
+import { VisibleOpponentModel } from "./visible-opponent-model.js";
+import { SearchTeacherRecorder } from "./search-teacher-recorder.js";
+import { LearnedPriorTacticalAgent } from "./learned-prior-tactical-agent.js";
 import { DodgerJsAgent, LaikaJsAgent } from "./scripted-opponents.js";
 
 const EMPTY = Object.freeze({
@@ -111,8 +114,47 @@ class IdleJsAgent {
 }
 
 function makeAgent(name, seed, opponentModel) {
+  if (name === "p27-js-tactical-v2-recorder") {
+    return new SearchTeacherRecorder({ seed, oppModel: opponentModel });
+  }
   if (name === "p27-js-tactical-v2") {
-    return new TacticalV2Agent({ seed, oppModel: opponentModel });
+    return new TacticalCandidateAgent({
+      seed,
+      oppModel: opponentModel,
+      enableShotSettlementAudit: true,
+    });
+  }
+  const doubleDeathMatch = /^p27-js-tactical-dd-safe(?:-m(\d+))?$/.exec(name);
+  if (doubleDeathMatch) {
+    return new TacticalCandidateAgent({
+      seed,
+      oppModel: opponentModel,
+      enableShotSettlementAudit: true,
+      maximumUnsafeAuditsPerRound: Number(doubleDeathMatch[1] ?? 4),
+    });
+  }
+  if (name === "p27-js-tactical-opponent-model") {
+    return new TacticalCandidateAgent({
+      seed,
+      oppModel: opponentModel,
+      opponentBehavior: new VisibleOpponentModel(),
+    });
+  }
+  if (name === "p27-js-tactical-combined") {
+    return new TacticalCandidateAgent({
+      seed,
+      oppModel: opponentModel,
+      enableShotSettlementAudit: true,
+      opponentBehavior: new VisibleOpponentModel(),
+    });
+  }
+  const learnedPriorMatch = /^p27-js-tactical-prior-k(\d+)$/.exec(name);
+  if (learnedPriorMatch) {
+    return new LearnedPriorTacticalAgent({
+      seed,
+      oppModel: opponentModel,
+      priorTopK: Number(learnedPriorMatch[1]),
+    });
   }
   if (name === "p27-js-tactical") {
     return new TacticalSafetyAgent({ seed, oppModel: opponentModel });
@@ -387,7 +429,7 @@ export class BrowserArena {
         search_changes: this.searchChanges,
         change_rate: this.searchChanges / Math.max(1, searches),
         deadline_hits: 0,
-        candidates_evaluated: searches * 10,
+        candidates_evaluated: this.leftAgent?.priorCandidates ?? searches * 10,
         last_decision_ms: this.lastDecisionMs[0],
         last_search_ms: this.lastDecisionMs[0],
         p50_ms: percentile(this.decisionSamples, 0.5),

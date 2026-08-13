@@ -23,21 +23,24 @@ The deployed champion is **Tactical**. It is primarily a browser-native online
 search agent, not the historical P27b neural policy. Tactical evaluates legal
 actions with the exact game model, then adds visible-bullet safety, post-kill
 survival, topology pursuit, and physics-verified moving-target interception.
+Before a crowded firing window, it now also verifies that the predicted kill
+still has a survivable settlement path and suppresses unsafe shots.
 
 ## Current results
 
 | Agent / benchmark | True result | Decision cost | Role |
 |---|---:|---:|---|
-| **Tactical vs Laika** | **286/300 = 95.3%** | **1.03 ms p50 / 10.65 ms p95** | Deployed champion |
-| Tactical four-opponent pool | 197/208 = 94.7% | 8.69 ms aggregate p95 | Laika, Hunter, Dodger, Random; both colors |
+| **Tactical vs Laika** | **291/300 = 97.0%** | **1.69 ms p50 / 15.62 ms p95** | Deployed champion |
+| Tactical four-opponent pool | 202/208 = 97.1% | 13.28 ms aggregate p95 | Laika, Hunter, Dodger, Random; both colors |
 | KillField vs Laika | 262/300 = 87.3% | 5.92 ms reference p95 | Third-party search baseline |
 | KillField four-opponent sample | 76/104 = 73.1% | same seeded protocol | Third-party generalisation baseline |
 | P27b | 1330/1500 = 88.7% | 8.6 ms | Historical pure-network baseline |
 | Exact-state shielded MPC | 297/300 = 99.0% | seconds | Privileged offline teacher, not deployable |
 
-Tactical's 300-game blind run used fresh seeds starting at `1900000`: 286 wins,
-10 losses, 4 double-KOs, and 0 draws. At 25 FPS the frame budget is 40 ms, so its
-10.65 ms p95 remains comfortably real-time.
+Tactical's latest 300-game blind run used fresh seeds starting at `2900000`: 291
+wins, 5 losses, 4 double-KOs, and 0 draws. The frozen predecessor scored 288/300
+on exactly the same seeds. At 25 FPS the frame budget is 40 ms, so the new
+15.62 ms p95 remains comfortably real-time.
 
 All public scores use **true wins**. Killing Laika first and then dying to a live
 bullet is a double-KO, not a win.
@@ -54,7 +57,7 @@ where it fails, and which information planning contributes.
 | Leak-free MPC | 96.0% | Short exact planning is exceptionally strong in this game |
 | P21–P27 search distillation | up to 88.7% | Regress all action scores; argmax cloning suffers from tied labels |
 | P27b pure network | 88.7% | Fast learned baseline, but below fair online planning |
-| **Tactical** | **95.3%** | Search + explicit safety + failure-driven anti-evasion is the product path |
+| **Tactical** | **97.0%** | Search + explicit safety + failure-driven anti-evasion is the product path |
 | Privileged exact teacher | 99.0% | Useful label oracle, but reads hidden RNG/opponent state |
 
 ### Tactical decision stack
@@ -67,6 +70,8 @@ inverse-density attack field
 10 legal first actions × exact 36-frame rollout
       ↓
 visible-bullet and own-bullet safety verification
+      ↓
+sparse pre-fire settlement audit for crowded bullet states
       ↓
 sparse two-stage correction / post-kill survival
       ↓
@@ -106,6 +111,10 @@ gate on win rate, paired regressions, double-KO, draw, color gap, and p95
 The browser displays the last frozen league report. The offline flywheel generates
 machine-readable comparison and hard-case files. No candidate is public until it
 passes every gate.
+
+A resumable unattended flywheel is scheduled every day at 02:00 local time. It
+starts with the permanent regression seeds, stops failed candidates early, and
+only unlocks the 300-game blind test after every paired pool gate passes.
 
 ```bash
 cd web

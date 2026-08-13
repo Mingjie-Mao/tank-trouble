@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-13T00:00:00.000Z",
+  "protocol": "paired fresh-seed Laika blind evaluation",
+  "seed": 2900000,
+  "rounds": 300,
+  "frameBudgetMs": 40,
+  "predecessor": {
+    "policy": "p27-js-tactical-v2-pre-settlement-audit",
+    "wins": 288,
+    "losses": 8,
+    "doubleDeaths": 4,
+    "draws": 0,
+    "winRate": 0.96,
+    "decisionP50Ms": 1.584,
+    "decisionP95Ms": 15.765,
+    "decisionP99Ms": 29.887
+  },
+  "champion": {
+    "policy": "p27-js-tactical-v2",
+    "name": "Tactical",
+    "wins": 291,
+    "losses": 5,
+    "doubleDeaths": 4,
+    "draws": 0,
+    "winRate": 0.97,
+    "decisionP50Ms": 1.686,
+    "decisionP95Ms": 15.623,
+    "decisionP99Ms": 29.788
+  },
+  "pairedDelta": {
+    "wins": 3,
+    "losses": -3,
+    "doubleDeaths": 0,
+    "draws": 0,
+    "decisionP95Ms": -0.142
+  },
+  "promotion": "passed"
+}

@@ -16,9 +16,9 @@ function worstColorGap(report) {
 export function summarizeSelfplayFlywheel({
   championReport,
   candidateReport,
-  maximumPoolRegression = CHAMPION_BASELINE.promotionGate.maximumOpponentPoolRegression,
-  maximumColorGap = CHAMPION_BASELINE.promotionGate.maximumColorGap,
+  maximumPoolRegression = 0,
   maximumP95Ms = CHAMPION_BASELINE.promotionGate.maximumP95DecisionMs,
+  latencyNoiseTolerance = 0,
 }) {
   const championRows = new Map(championReport.games.map((row) => [rowKey(row), row]));
   const changes = [];
@@ -47,14 +47,22 @@ export function summarizeSelfplayFlywheel({
   ));
   const candidate = candidateReport.overall;
   const champion = championReport.overall;
+  const championColorGap = worstColorGap(championReport);
+  const candidateColorGap = worstColorGap(candidateReport);
   const gates = {
     pairedCorrections: recoveries.length >= regressions.length,
     opponentPool: candidate.winRate >= champion.winRate - maximumPoolRegression,
     doubleDeath: rate(candidate.double_death, candidate.games)
       <= rate(champion.double_death, champion.games),
     draw: candidate.draw <= champion.draw,
-    color: worstColorGap(candidateReport) <= maximumColorGap,
-    latency: candidate.p95DecisionMs <= maximumP95Ms,
+    // The paired champion is the fairness reference. A previously published
+    // absolute target remains telemetry, but a corrected evaluation must not
+    // reject a candidate that improves a known champion-side imbalance.
+    color: candidateColorGap <= championColorGap + 1e-12,
+    latency: candidate.p95DecisionMs <= Math.min(
+      maximumP95Ms,
+      champion.p95DecisionMs * (1 + latencyNoiseTolerance),
+    ),
   };
   return {
     schemaVersion: 1,
@@ -67,6 +75,10 @@ export function summarizeSelfplayFlywheel({
     championOverall: champion,
     candidateOverall: candidate,
     winRateDelta: candidate.winRate - champion.winRate,
+    doubleDeathRateDelta: rate(candidate.double_death, candidate.games)
+      - rate(champion.double_death, champion.games),
+    colorGapDelta: candidateColorGap - championColorGap,
+    p95DecisionMsDelta: candidate.p95DecisionMs - champion.p95DecisionMs,
     regressions,
     recoveries,
     changes,
@@ -75,4 +87,3 @@ export function summarizeSelfplayFlywheel({
     readyForLaikaBlind: Object.values(gates).every(Boolean),
   };
 }
-

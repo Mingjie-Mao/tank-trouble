@@ -324,7 +324,8 @@ function LeagueMonitor({
         <span className="done">2 · 104 局换边联赛</span>
         <span className="done">3 · Dodger 反规避</span>
         <span className="done">4 · 300 局盲测晋级</span>
-        <span className="active">5 · 自博弈困难局飞轮</span>
+        <span className="done">5 · 双亡安全审计</span>
+        <span className="active">6 · 夜间困难局飞轮</span>
       </div>
     </section>
   );

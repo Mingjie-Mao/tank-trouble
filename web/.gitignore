@@ -39,3 +39,4 @@ yarn-error.log*
 /outputs/
 /work/
 /.npm-cache/
+/data/nightly/

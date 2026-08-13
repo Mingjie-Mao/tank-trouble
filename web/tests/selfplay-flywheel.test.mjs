@@ -48,3 +48,16 @@ test("flywheel identifies repaired and regressed paired seeds", () => {
   assert.equal(summary.readyForLaikaBlind, false);
 });
 
+test("flywheel rejects color or latency degradation relative to its paired champion", () => {
+  const champion = report("champion", ["win", "win", "win", "win"], 8);
+  const candidate = report("candidate", ["win", "win", "win", "win"], 8.3);
+  candidate.opponents["laika-js"] = { ...candidate.opponents["laika-js"], colorGap: 0.25 };
+  const summary = summarizeSelfplayFlywheel({
+    championReport: champion,
+    candidateReport: candidate,
+  });
+  assert.equal(summary.gates.opponentPool, true);
+  assert.equal(summary.gates.color, false);
+  assert.equal(summary.gates.latency, false);
+  assert.equal(summary.readyForLaikaBlind, false);
+});

@@ -40,6 +40,21 @@ function freezeOpponent(game) {
   enemy.fire = false;
 }
 
+function applyOpponentPrediction(tank, behaviorModel, frameOffset) {
+  if (behaviorModel === null) {
+    tank.fire = false;
+    return;
+  }
+  const [throttle, turn] = behaviorModel.predict(frameOffset);
+  tank.forward = throttle === 2;
+  tank.backup = throttle === 0;
+  tank.turnLeft = turn === 0;
+  tank.turnRight = turn === 2;
+  // The model is for motion only. Inventing a future trigger press would add
+  // bullets that are not yet visible and turn a fair predictor into a guess.
+  tank.fire = false;
+}
+
 function advanceLocal(game, action, frames) {
   const sandbox = makeSandbox(game, "L1", 0);
   freezeOpponent(sandbox);
@@ -48,10 +63,10 @@ function advanceLocal(game, action, frames) {
   return sandbox;
 }
 
-function predictedEnemyAfterOneFrame(game, action) {
+function predictedEnemyAfterOneFrame(game, action, behaviorModel = null) {
   const sandbox = makeSandbox(game, "L1", 0);
   sandbox.tanks[1].ai = null;
-  sandbox.tanks[1].fire = false;
+  applyOpponentPrediction(sandbox.tanks[1], behaviorModel, 1);
   applyAction(sandbox, action);
   sandbox.step();
   return { x: sandbox.tanks[1].x, y: sandbox.tanks[1].y };
@@ -63,7 +78,9 @@ function predictedEnemyAfterOneFrame(game, action) {
  * bullet together through the real collision/reflection code. The opponent's
  * current buttons are merely held constant; no controller state is read.
  */
-export function movingInterceptShot(game, horizon = INTERCEPT_HORIZON) {
+export function movingInterceptShot(
+  game, horizon = INTERCEPT_HORIZON, behaviorModel = null,
+) {
   const me = game.tanks[0];
   if (!(me.alive && game.tanks[1].alive && me.triggerReleased
       && game.weaponReady(me))) {
@@ -73,11 +90,11 @@ export function movingInterceptShot(game, horizon = INTERCEPT_HORIZON) {
   const simulatedMe = sandbox.tanks[0];
   const simulatedEnemy = sandbox.tanks[1];
   simulatedEnemy.ai = null;
-  simulatedEnemy.fire = false;
   applyAction(sandbox, [1, 1, 1]);
   let bounces = 0;
   for (let frame = 0; frame < horizon; frame += 1) {
     if (frame === 1) simulatedMe.fire = false;
+    applyOpponentPrediction(simulatedEnemy, behaviorModel, frame + 1);
     const events = sandbox.step();
     bounces += events.filter((event) => event[0] === "bounce").length;
     if (events.some((event) => event[0] === "hit"
@@ -91,14 +108,16 @@ export function movingInterceptShot(game, horizon = INTERCEPT_HORIZON) {
 
 function simulateAimIntercept(
   game, firstTurn, firstTurnFrames, secondTurn, secondTurnFrames, horizon,
+  behaviorModel,
 ) {
   const sandbox = makeSandbox(game, "L1", 0);
   const me = sandbox.tanks[0];
   const enemy = sandbox.tanks[1];
   enemy.ai = null;
-  enemy.fire = false;
+  let simulatedFrame = 0;
   const advance = () => {
-    enemy.fire = false;
+    simulatedFrame += 1;
+    applyOpponentPrediction(enemy, behaviorModel, simulatedFrame);
     return sandbox.step();
   };
   if (firstTurnFrames > 0) {
@@ -146,7 +165,7 @@ function simulateAimIntercept(
 
 /** Search every physically distinct heading, including reflected paths. */
 export function movingAimInterceptPlan(
-  game, horizon = INTERCEPT_HORIZON,
+  game, horizon = INTERCEPT_HORIZON, behaviorModel = null,
 ) {
   const me = game.tanks[0];
   if (!(me.alive && game.tanks[1].alive && me.triggerReleased
@@ -187,6 +206,7 @@ export function movingAimInterceptPlan(
       candidate.secondTurn,
       candidate.secondTurnFrames,
       horizon,
+      behaviorModel,
     );
     if (!(result.hit && result.survived)) continue;
     // Earliest total kill first; prefer direct fire only as a tie-breaker.
@@ -300,6 +320,7 @@ export class TacticalV2Agent extends TacticalSafetyAgent {
     this.stationaryShotsSuppressed = 0;
     this.interceptPlan = null;
     this.nextInterceptScanFrame = 0;
+    this.opponentBehavior = options.opponentBehavior ?? null;
   }
 
   resetProgress(game) {
@@ -327,6 +348,7 @@ export class TacticalV2Agent extends TacticalSafetyAgent {
   }
 
   act(game) {
+    this.opponentBehavior?.observe(game);
     const baseline = super.act(game);
     if (!game.tanks[0].alive || !game.tanks[1].alive || game.frozen) return baseline;
     const distance = this.observeProgress(game);
@@ -362,7 +384,7 @@ export class TacticalV2Agent extends TacticalSafetyAgent {
         if (this.interceptPlan.remaining > 0) {
           this.interceptPlan.remaining -= 1;
           const action = [1, this.interceptPlan.firstTurn, 0];
-          const expected = predictedEnemyAfterOneFrame(game, action);
+          const expected = predictedEnemyAfterOneFrame(game, action, this.opponentBehavior);
           this.interceptPlan.expectedEnemyX = expected.x;
           this.interceptPlan.expectedEnemyY = expected.y;
           this.commitRemaining = 0;
@@ -373,7 +395,7 @@ export class TacticalV2Agent extends TacticalSafetyAgent {
         if (this.interceptPlan.secondRemaining > 0) {
           this.interceptPlan.secondRemaining -= 1;
           const action = [1, this.interceptPlan.secondTurn, 0];
-          const expected = predictedEnemyAfterOneFrame(game, action);
+          const expected = predictedEnemyAfterOneFrame(game, action, this.opponentBehavior);
           this.interceptPlan.expectedEnemyX = expected.x;
           this.interceptPlan.expectedEnemyY = expected.y;
           this.commitRemaining = 0;
@@ -381,7 +403,7 @@ export class TacticalV2Agent extends TacticalSafetyAgent {
             this.interceptPlan.bounces > 0
               ? "counter_aim_ricochet" : "counter_aim_intercept");
         }
-        const verified = movingInterceptShot(game);
+        const verified = movingInterceptShot(game, INTERCEPT_HORIZON, this.opponentBehavior);
         this.interceptPlan = null;
         if (verified.hit && verified.survived) {
           this.interceptFires += 1;
@@ -396,7 +418,7 @@ export class TacticalV2Agent extends TacticalSafetyAgent {
       if (game.frame >= this.nextInterceptScanFrame) {
         this.interceptChecks += 1;
         this.nextInterceptScanFrame = game.frame + INTERCEPT_SCAN_INTERVAL;
-        intercept = movingAimInterceptPlan(game);
+        intercept = movingAimInterceptPlan(game, INTERCEPT_HORIZON, this.opponentBehavior);
       }
       if (intercept !== null) {
         this.commitRemaining = 0;
@@ -409,7 +431,9 @@ export class TacticalV2Agent extends TacticalSafetyAgent {
         }
         const firstAction = [1, intercept.firstTurnFrames > 0
           ? intercept.firstTurn : intercept.secondTurn, 0];
-        const expected = predictedEnemyAfterOneFrame(game, firstAction);
+        const expected = predictedEnemyAfterOneFrame(
+          game, firstAction, this.opponentBehavior,
+        );
         this.interceptPlan = {
           firstTurn: intercept.firstTurn,
           remaining: intercept.firstTurnFrames - 1,
@@ -473,6 +497,7 @@ export class TacticalV2Agent extends TacticalSafetyAgent {
       interceptCancelled: this.interceptCancelled,
       stationaryShotsSuppressed: this.stationaryShotsSuppressed,
       bestTopologicalDistance: this.bestDistance,
+      ...(this.opponentBehavior?.telemetry() ?? {}),
     };
   }
 }

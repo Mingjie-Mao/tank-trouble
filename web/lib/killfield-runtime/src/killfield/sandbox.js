@@ -20,19 +20,25 @@ import { Game, Tank, Bullet } from "../game.js";
 import { LaikaAI } from "../laika.js";
 import { Rng } from "../rng.js";
 
-function copyTank(tank, sandbox) {
+function copyTank(tank, sandbox, visibleIndex) {
   const copy = Object.create(Tank.prototype);
   Object.assign(copy, tank);
   copy.game = sandbox;
+  // A sandbox is always ego-relative: tanks[0] is the controlled tank and
+  // tanks[1] is its opponent. Game.destroyTank() indexes by this number, so a
+  // mirrored rollout must use view-relative numbers as well as array order.
+  copy.number = visibleIndex;
   copy.ai = null;
   return copy;
 }
 
-function copyBullet(bullet, sandbox) {
+function copyBullet(bullet, sandbox, visibleTanks) {
   const copy = Object.create(Bullet.prototype);
   Object.assign(copy, bullet);
   copy.game = sandbox;
-  copy.owner = sandbox.tanks[bullet.owner.number];
+  const ownerIndex = visibleTanks.indexOf(bullet.owner);
+  if (ownerIndex === -1) throw new Error(`bullet ${bullet.name} owner is not visible`);
+  copy.owner = sandbox.tanks[ownerIndex];
   return copy;
 }
 
@@ -63,9 +69,17 @@ export function makeSandbox(game, oppModel = "L2", rngSeed = 0) {
   sb.rng = new Rng(rngSeed);
 
   // Mutable state copied.
-  sb.tanks = game.tanks.map((t) => copyTank(t, sb));
-  sb.bullets = game.bullets.map((b) => copyBullet(b, sb));
-  sb.tankFields = game.tankFields.map((f) => ({ x: f.x, y: f.y }));
+  // Resolve bullet ownership by object position in the supplied view. Tank
+  // numbers are physical identities and therefore are intentionally not
+  // swapped by mirrorView(); indexing with number made right-side rollouts
+  // attribute every live bullet to the wrong tank.
+  const visibleTanks = game.tanks;
+  sb.tanks = visibleTanks.map((t, index) => copyTank(t, sb, index));
+  sb.bullets = game.bullets.map((b) => copyBullet(b, sb, visibleTanks));
+  sb.tankFields = visibleTanks.map((tank) => {
+    const field = game.tankFields[tank.number];
+    return { x: field.x, y: field.y };
+  });
   sb.events = [];
   sb.frame = game.frame;
   sb.aliveCount = game.aliveCount;
