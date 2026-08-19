@@ -129,6 +129,31 @@ function makeAgent(name, seed, opponentModel) {
       fireContinuation: true,
     });
   }
+  // Phase 3 of the adoption plan: the champion plus the visible-state opponent
+  // model. The privileged ablation showed K4+K1 is worth +1.67pp when the
+  // opponent's plan is known and -0.10pp when it is not, so the remaining
+  // headroom sits in opponent prediction rather than in search or physics.
+  if (name === "p27-js-tactical-v3-om") {
+    return new TacticalCandidateAgent({
+      seed,
+      oppModel: opponentModel,
+      enableShotSettlementAudit: true,
+      fireContinuation: true,
+      opponentBehavior: new VisibleOpponentModel(),
+    });
+  }
+  // Latency-tail candidates: the evasion search expands only its widest N
+  // surviving roots instead of all nine.
+  const breadthMatch = /^p27-js-tactical-v3-b(\d+)$/.exec(name);
+  if (breadthMatch) {
+    return new TacticalCandidateAgent({
+      seed,
+      oppModel: opponentModel,
+      enableShotSettlementAudit: true,
+      fireContinuation: true,
+      evasionRootBreadth: Number(breadthMatch[1]),
+    });
+  }
   if (name === "p27-js-tactical-v2") {
     return new TacticalCandidateAgent({
       seed,

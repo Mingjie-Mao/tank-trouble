@@ -648,3 +648,121 @@ the opponent's plan is known, physics accuracy converts directly into win rate.
 This also bounds the remaining headroom honestly. Fair-play Tactical at 96.00%
 is not 3pp away from a better algorithm; it is 3pp away from information it is
 not allowed to have.
+
+## Phase 6 — the latency tail (pruning rejected)
+
+Promotion cleared the p95 gate, but measuring per-frame cost in **selfplay**
+mode — the only mode where two agents plan on the same frame — exposed a tail
+that had never been measured, because every prior latency report used watch
+mode:
+
+| | p50 | p95 | p99 | max |
+|---|---:|---:|---:|---:|
+| frozen Tactical | 1.21 ms | 9.31 ms | 26.57 ms | 159.8 ms |
+| Tactical Smooth | 0.95 ms | 25.82 ms | 55.60 ms | 277.5 ms |
+
+The p99 exceeds the 40 ms frame budget in both, so **this is a pre-existing
+defect, not one Smooth introduced** — Smooth roughly doubles it.
+
+Attribution of frames above p99 (Smooth, 32k frames):
+
+```
+visible_bullet_two_stage   253/325 = 77.8%    the 9x9 evasion search
+topology_chase              31
+plan (K1's 18 plans)        12/325 =  3.7%
+density field rebuild       10/325 =  3.1%
+```
+
+Neither K1 nor field rebuilding explains the tail. It is the evasion search:
+nine roots, each expanded with nine continuations, 81 rollouts worst case.
+
+`evasionRootBreadth` was added to rank surviving roots by the clearance already
+achieved and expand only the widest N. Three settings, 600 paired rounds each:
+
+| Breadth | True wins | Double-KO | p95 | p99 | Paired vs b9 |
+|---|---:|---:|---:|---:|---|
+| **9 (default)** | 571 | **9** | 24.93 ms | 52.39 ms | — |
+| 5 | 570 | 13 | 24.18 ms | 36.66 ms | win p=1.000, dbl p=0.289 |
+| 3 | 570 | 15 | 22.19 ms | 31.07 ms | win p=1.000, dbl p=0.109 |
+
+Win rate is untouched at every setting — the paired harm/save counts are
+symmetric (7/6, 9/8, 6/6) and every p is 1.000. Double-KOs rise monotonically,
+9 → 13 → 15. No individual comparison is significant, but three ordered points
+with three same-signed comparisons are enough to treat the increase as
+systematic rather than noise.
+
+**Rejected, and the default is unchanged.** The trade is bad in this project's
+terms: the problem is confined to the selfplay demonstration mode, p95 already
+passes the promotion gate, and the cost lands on double-KOs — precisely the
+metric where this repository's settlement layers are its advantage over
+upstream (K4 costs the bare upstream agent +69% double-KOs and costs Tactical
+0%). Spending that advantage to improve a non-blocking performance figure is
+the wrong direction.
+
+The option remains in the code, defaulted to full expansion.
+
+If the tail is attacked later, the better design is a **budget-triggered**
+narrowing rather than an unconditional one: expand fully by default and narrow
+only when the frame's elapsed time already approaches the deadline. The version
+measured here pays the quality cost on all frames to help the 1% that need it.
+
+Note also that `max` is not a usable metric here: repeated runs of the same
+configuration produced 779.9 ms and 247.1 ms while p99 stayed at 32.0 and 31.1.
+Single-frame extremes track GC, not policy.
+
+## Phase 7 — opponent modelling (no value found)
+
+The privileged ablation put the remaining headroom in opponent prediction:
+K4+K1 is worth +1.67pp when the opponent's plan is known and −0.10pp when it is
+not. The obvious follow-up was to pair the champion with this repository's
+existing `VisibleOpponentModel`, which learns action run-lengths and transitions
+from visible controls only.
+
+Reading the code first changed what the experiment could possibly show.
+`opponentBehavior` feeds only the **shot-settlement audit** and the **intercept
+predictor**; the main 36-frame rollout uses `oppModel` and is untouched. And in
+watch mode `oppModel` is already `L2`, which runs Laika's real algorithm. So
+against Laika the model can only replace real-algorithm prediction with a weaker
+statistical one, in two narrow places. The +1.67pp is not reachable this way at
+all: that gap is Laika's internal goal stack plus future RNG, both hidden by
+definition.
+
+The only setting where the model has room is selfplay, where `oppModel` is `L1`
+(freeze the opponent's current buttons). That is the four-opponent pool, so the
+test ran there — 320 paired rounds, same seeds and protocol as the promotion
+gate.
+
+| Opponent | Champion | + opponent model | Paired flips |
+|---|---:|---:|---|
+| laika-js | 71/80 | 71/80 | 0 harmed / 0 saved |
+| hunter-js | 75/80 | 75/80 | 0 / 0 |
+| dodger-js | 77/80 | 75/80 | **2 / 0** |
+| random-js | 79/80 | 79/80 | 0 / 0 |
+| **Total** | **302/320** | **300/320** | Δ=−0.63pp, CI [−1.49, +0.24], p=0.500 |
+
+**318 of 320 rounds are identical round-for-round.** The model changed nothing
+against three of the four opponents, and cost two rounds against Dodger, both
+converted into timeout draws — consistent with hesitating while chasing an
+evasive opponent whose dodges the model predicts.
+
+**Not adopted.** The result is worth recording as a bound rather than a failure:
+opponent modelling has little room in this project as currently wired, because
+the component that would benefit — the main rollout — does not consume it, and
+where it is consumed the incumbent predictor is already the opponent's real
+algorithm.
+
+Making the main rollout consume a learned model is a much larger change, and the
+privileged ablation caps what it could return: against Laika the ceiling is `L2`,
+which the search already uses. Against a searching opponent in selfplay the
+model would have to predict another Tactical, which is harder than predicting a
+scripted one.
+
+## Where this leaves the project
+
+| Axis | Status |
+|---|---|
+| Movement quality | Solved. Wall contact 21% → 3%, zero-motion 12.5% → 0.12% |
+| Policy strength | K1 adopted; +0.50pp on frozen, not significant alone |
+| Latency tail | Understood and attributed; pruning rejected as a bad trade |
+| Opponent modelling | Bounded and rejected — no measurable room in the current wiring |
+| Remaining gap to the oracle | ~3pp, and it is information the agent may not have |
