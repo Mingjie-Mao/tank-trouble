@@ -1,7 +1,9 @@
-# P41 击杀后目标函数塌陷（**已知回归，未修复**）
+# P41 击杀后目标函数塌陷（**已修复**）
 
-> 状态：`training/killfield_teacher.py` **当前带着这个回归入档**。
-> 接手前先读完本文，不要以为击杀后的呆滞是随机现象。
+> 状态：**已于 2026-08-13 修复，未回退状态机。**
+> 修法见文末「修复实施」一节；下面的诊断全部保留，因为根因分析仍然成立。
+> 守卫测试：`test_killfield_teacher.py::test_post_kill_objective_is_not_flat`
+> 与 `::test_post_kill_window_keeps_the_tank_moving`。
 
 ## 背景：为什么动这块
 
@@ -98,5 +100,63 @@ score -= RISK_WEIGHT * analyzer.incoming_risk(sandbox)
 本文件描述的六处改动可逐条反向还原。注意
 `training/killfield_teacher.py` **在此之前从未提交过**，
 所以没有 git 基线可 `checkout`，只能手工反向编辑。
-`post_kill_survival_scores` 仍保留在 `training/killfield_fast_distill.py`，
-`killfield_realtime.py` 与 `hybrid_agent.py` 仍在使用，未受本次改动影响。
+
+---
+
+## 修复实施（2026-08-13）
+
+按上面「修复方向 2」做，**没有回退状态机**——`act()` 里依然没有击杀后分支。
+
+### 诊断修正
+
+上文写「`incoming_risk` 建模的是对手的开火机会」，这一句不准确。读代码
+（`opportunity_distill.py:138`）它其实已经遍历 `game.bullets`，不分归属。
+真正的毛病是它**是个 0/1 阶跃**：
+
+```python
+hit = result[:, 0] <= HIT_RADIUS_SCALE * game.scale   # 0.25 格
+if not hit.any():
+    return 0.0
+```
+
+预测弹道差 0.26 格擦身而过，与隔着半张地图，同样返回 0。所以它给不出
+任何距离梯度。而且这三个复现种子在击杀瞬间场上**一颗子弹都没有**
+（`live_bullets=0`），此时"十个候选一样安全"其实是对的，塌陷有两个成因：
+
+1. **有飞行弹时**：阶跃函数没有安全梯度 → 补连续的最近净空。
+2. **无飞行弹时**：安全项对所有候选恒等 → 补位移项打破并列，
+   否则 argmax 在平面上乱选，坦克站死。
+
+### 改动
+
+`density_rollout` 在击杀后的每一帧记录到任意飞行弹的最近距离（不分归属），
+窗口走完时把两个连续量并进返回值：
+
+```python
+return float(
+    kill_score
+    - RISK_WEIGHT * analyzer.incoming_risk(sandbox)
+    + POST_KILL_CLEARANCE_WEIGHT * min(post_kill_clearance, 8.0)
+    + POST_KILL_MOBILITY_WEIGHT * min(displacement, 8.0))
+```
+
+两个权重（40.0 / 0.5）直接沿用被删掉的状态机里那套已验证打分，
+只是折进统一的 rollout，不再是第二个目标函数。
+
+### 实测
+
+| 种子 | 候选中并列数 | 不同取值数 | 75 帧路程(格) |
+|---|---:|---:|---:|
+| | 修前 → 修后 | 修前 → 修后 | 修前 → 修后 |
+| 37500009 | 9 → 3 | 2 → 8 | 0.34 → 4.87 |
+| 37500002 | 9 → 3 | 2 → 8 | 0.45 → 4.41 |
+| 37500011 | 9 → 3 | 2 → 8 | 0.97 → 4.51 |
+
+剩下的 3 个并列是静止的三个转向候选：位移与净空都相同，**并列是物理事实**，
+不是塌陷。守卫测试因此断言"并列 ≤ 3"而不是"无并列"。
+
+### 未做
+
+「修复方向 1」（把想象中的击杀按置信度折扣）**没有实施**。
+14.7% 的决策里存在想象击杀、其中 51.1% 完全打平，这个问题独立存在，
+与本次塌陷不是同一个洞。

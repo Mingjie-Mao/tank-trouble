@@ -1,15 +1,16 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-13T03:56:55.875Z",
+  "generatedAt": "2026-08-13T06:56:00.000Z",
   "champion": "p27-js-tactical-v2",
   "immutableSeedPolicy": "append-only after validation; never tune against one seed",
   "sourceReports": [
-    "/tmp/tactical-final-pool-2500000.json",
-    "/tmp/tactical-final-pool-2510000.json"
+    "data/blind/tactical-final-pool-2500000.json",
+    "data/blind/tactical-final-pool-2510000.json",
+    "data/blind/tactical-anti-stall-blind-3200000.json"
   ],
   "counts": {
-    "total": 24,
-    "hardCases": 8,
+    "total": 48,
+    "hardCases": 32,
     "slowWins": 16
   },
   "cases": [
@@ -332,6 +333,331 @@
         "double_death"
       ],
       "source": "/tmp/tactical-final-pool-2510000.json"
+    },
+    {
+      "key": "laika-js:watch:2900019",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 2900019,
+      "baselineOutcome": "double_death",
+      "baselineFrames": 152,
+      "baselineP95DecisionMs": null,
+      "tags": [
+        "retired-blind",
+        "hard-case",
+        "double_death"
+      ],
+      "source": "/tmp/blind-dd-safe-300-2900000.json"
+    },
+    {
+      "key": "laika-js:watch:2900061",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 2900061,
+      "baselineOutcome": "loss",
+      "baselineFrames": 368,
+      "baselineP95DecisionMs": null,
+      "tags": [
+        "retired-blind",
+        "hard-case",
+        "loss"
+      ],
+      "source": "/tmp/blind-dd-safe-300-2900000.json"
+    },
+    {
+      "key": "laika-js:watch:2900093",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 2900093,
+      "baselineOutcome": "loss",
+      "baselineFrames": 174,
+      "baselineP95DecisionMs": null,
+      "tags": [
+        "retired-blind",
+        "hard-case",
+        "loss"
+      ],
+      "source": "/tmp/blind-dd-safe-300-2900000.json"
+    },
+    {
+      "key": "laika-js:watch:2900134",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 2900134,
+      "baselineOutcome": "double_death",
+      "baselineFrames": 206,
+      "baselineP95DecisionMs": null,
+      "tags": [
+        "retired-blind",
+        "hard-case",
+        "double_death"
+      ],
+      "source": "/tmp/blind-dd-safe-300-2900000.json"
+    },
+    {
+      "key": "laika-js:watch:2900141",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 2900141,
+      "baselineOutcome": "loss",
+      "baselineFrames": 186,
+      "baselineP95DecisionMs": null,
+      "tags": [
+        "retired-blind",
+        "hard-case",
+        "loss"
+      ],
+      "source": "/tmp/blind-dd-safe-300-2900000.json"
+    },
+    {
+      "key": "laika-js:watch:2900197",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 2900197,
+      "baselineOutcome": "loss",
+      "baselineFrames": 415,
+      "baselineP95DecisionMs": null,
+      "tags": [
+        "retired-blind",
+        "hard-case",
+        "loss"
+      ],
+      "source": "/tmp/blind-dd-safe-300-2900000.json"
+    },
+    {
+      "key": "laika-js:watch:2900207",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 2900207,
+      "baselineOutcome": "loss",
+      "baselineFrames": 234,
+      "baselineP95DecisionMs": null,
+      "tags": [
+        "retired-blind",
+        "hard-case",
+        "loss"
+      ],
+      "source": "/tmp/blind-dd-safe-300-2900000.json"
+    },
+    {
+      "key": "laika-js:watch:2900276",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 2900276,
+      "baselineOutcome": "double_death",
+      "baselineFrames": 444,
+      "baselineP95DecisionMs": null,
+      "tags": [
+        "retired-blind",
+        "hard-case",
+        "double_death"
+      ],
+      "source": "/tmp/blind-dd-safe-300-2900000.json"
+    },
+    {
+      "key": "laika-js:watch:2900277",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 2900277,
+      "baselineOutcome": "double_death",
+      "baselineFrames": 488,
+      "baselineP95DecisionMs": null,
+      "tags": [
+        "retired-blind",
+        "hard-case",
+        "double_death"
+      ],
+      "source": "/tmp/blind-dd-safe-300-2900000.json"
+    },
+    {
+      "key": "laika-js:watch:3200015",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 3200015,
+      "baselineOutcome": "loss",
+      "baselineFrames": 291,
+      "baselineP95DecisionMs": 12.561874999999418,
+      "tags": ["retired-blind", "hard-case", "loss", "opponent_ricochet"],
+      "source": "data/failures/champion-3200000.json"
+    },
+    {
+      "key": "laika-js:watch:3200019",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 3200019,
+      "baselineOutcome": "double_death",
+      "baselineFrames": 215,
+      "baselineP95DecisionMs": 5.781749999998283,
+      "tags": ["retired-blind", "hard-case", "double_death", "post_kill_own_ricochet"],
+      "source": "data/failures/champion-3200000.json"
+    },
+    {
+      "key": "laika-js:watch:3200069",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 3200069,
+      "baselineOutcome": "double_death",
+      "baselineFrames": 784,
+      "baselineP95DecisionMs": 9.167874999999185,
+      "tags": ["retired-blind", "hard-case", "double_death", "opponent_ricochet"],
+      "source": "data/failures/champion-3200000.json"
+    },
+    {
+      "key": "laika-js:watch:3200116",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 3200116,
+      "baselineOutcome": "double_death",
+      "baselineFrames": 152,
+      "baselineP95DecisionMs": 7.126542000012705,
+      "tags": ["retired-blind", "hard-case", "double_death", "post_kill_own_ricochet"],
+      "source": "data/failures/champion-3200000.json"
+    },
+    {
+      "key": "laika-js:watch:3200117",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 3200117,
+      "baselineOutcome": "loss",
+      "baselineFrames": 299,
+      "baselineP95DecisionMs": 9.217832999973325,
+      "tags": ["retired-blind", "hard-case", "loss", "opponent_ricochet"],
+      "source": "data/failures/champion-3200000.json"
+    },
+    {
+      "key": "laika-js:watch:3200120",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 3200120,
+      "baselineOutcome": "loss",
+      "baselineFrames": 369,
+      "baselineP95DecisionMs": 8.454333000001498,
+      "tags": ["retired-blind", "hard-case", "loss", "opponent_ricochet"],
+      "source": "data/failures/champion-3200000.json"
+    },
+    {
+      "key": "laika-js:watch:3200140",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 3200140,
+      "baselineOutcome": "loss",
+      "baselineFrames": 575,
+      "baselineP95DecisionMs": 16.363291999994544,
+      "tags": ["retired-blind", "hard-case", "loss", "opponent_ricochet"],
+      "source": "data/failures/champion-3200000.json"
+    },
+    {
+      "key": "laika-js:watch:3200153",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 3200153,
+      "baselineOutcome": "loss",
+      "baselineFrames": 469,
+      "baselineP95DecisionMs": 7.921875,
+      "tags": ["retired-blind", "hard-case", "loss", "opponent_ricochet"],
+      "source": "data/failures/champion-3200000.json"
+    },
+    {
+      "key": "laika-js:watch:3200161",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 3200161,
+      "baselineOutcome": "loss",
+      "baselineFrames": 329,
+      "baselineP95DecisionMs": 10.089541999972425,
+      "tags": ["retired-blind", "hard-case", "loss", "opponent_ricochet"],
+      "source": "data/failures/champion-3200000.json"
+    },
+    {
+      "key": "laika-js:watch:3200163",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 3200163,
+      "baselineOutcome": "loss",
+      "baselineFrames": 386,
+      "baselineP95DecisionMs": 7.499874999979511,
+      "tags": ["retired-blind", "hard-case", "loss", "opponent_ricochet"],
+      "source": "data/failures/champion-3200000.json"
+    },
+    {
+      "key": "laika-js:watch:3200192",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 3200192,
+      "baselineOutcome": "double_death",
+      "baselineFrames": 346,
+      "baselineP95DecisionMs": 9.660875000001397,
+      "tags": ["retired-blind", "hard-case", "double_death", "post_kill_own_ricochet"],
+      "source": "data/failures/champion-3200000.json"
+    },
+    {
+      "key": "laika-js:watch:3200206",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 3200206,
+      "baselineOutcome": "double_death",
+      "baselineFrames": 111,
+      "baselineP95DecisionMs": 1.2094579999975394,
+      "tags": ["retired-blind", "hard-case", "double_death", "opponent_ricochet"],
+      "source": "data/failures/champion-3200000.json"
+    },
+    {
+      "key": "laika-js:watch:3200232",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 3200232,
+      "baselineOutcome": "loss",
+      "baselineFrames": 533,
+      "baselineP95DecisionMs": 8.816500000015367,
+      "tags": ["retired-blind", "hard-case", "loss", "opponent_ricochet"],
+      "source": "data/failures/champion-3200000.json"
+    },
+    {
+      "key": "laika-js:watch:3200254",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 3200254,
+      "baselineOutcome": "loss",
+      "baselineFrames": 129,
+      "baselineP95DecisionMs": 16.83329199999571,
+      "tags": ["retired-blind", "hard-case", "loss", "own_ricochet"],
+      "source": "data/failures/champion-3200000.json"
+    },
+    {
+      "key": "laika-js:watch:3200295",
+      "opponent": "laika-js",
+      "candidateSide": 0,
+      "mode": "watch",
+      "seed": 3200295,
+      "baselineOutcome": "loss",
+      "baselineFrames": 660,
+      "baselineP95DecisionMs": 7.8774580000317656,
+      "tags": ["retired-blind", "hard-case", "loss", "opponent_ricochet"],
+      "source": "data/failures/champion-3200000.json"
     }
-  ]
+  ],
+  "retiredBlindSeeds": [2900000, 3200000]
 }

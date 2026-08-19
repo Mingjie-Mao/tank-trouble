@@ -24,6 +24,7 @@ from tank_trouble_original import Game  # noqa: E402
 from training.mpc_agent import CANDIDATES, make_sandbox  # noqa: E402
 from tank_trouble_original.maze import h_open, v_open  # noqa: E402
 from training.evaluate import RoundTracker  # noqa: E402
+from training.behavior_events import BehaviorEventTracker  # noqa: E402
 from training.opportunity_distill import _shot_event  # noqa: E402
 from training.opportunity_teacher_v2 import OpportunityAnalyzer360  # noqa: E402
 from training.p26_amortized_mpc import (  # noqa: E402
@@ -186,6 +187,9 @@ def observe_round(policy, seed, args):
     )}
     pos_window = deque(maxlen=args.stall_window)
     input_window = deque(maxlen=args.stall_window)
+    event_pos_window = deque(maxlen=args.stall_window)
+    event_input_window = deque(maxlen=args.stall_window)
+    event_tracker = BehaviorEventTracker(args.fire_window_frames)
     high_risk_frames = 0
     clear_fire_frames = 0
     true_result = None
@@ -203,6 +207,15 @@ def observe_round(policy, seed, args):
         action = _action_tuple(inp)
         pos_window.append((t0.x, t0.y))
         input_window.append(cmd)
+        event_pos_window.append((t0.x, t0.y))
+        event_input_window.append(cmd)
+        event_tracker.update_action(action)
+        event_tracker.update_fire_window(
+            frames,
+            clear_line=(line >= args.fire_window_line),
+            fired=cmd[4],
+            enemy_alive=t1.alive,
+        )
 
         if risk >= args.good_dodge_risk:
             high_risk_frames += 1
@@ -273,6 +286,32 @@ def observe_round(policy, seed, args):
                 pos_window.clear()
                 input_window.clear()
 
+        stutter_active = False
+        dead_end_active = False
+        passive_active = False
+        if len(event_pos_window) == args.stall_window:
+            dx = event_pos_window[-1][0] - event_pos_window[0][0]
+            dy = event_pos_window[-1][1] - event_pos_window[0][1]
+            displacement = math.hypot(dx, dy)
+            moving_cmds = sum(
+                any(command[:4]) for command in event_input_window)
+            x, y = _cell(game, t0)
+            dead_end = _dead_end_penalty(game, x, y)
+            exits = _open_neighbors(game, x, y)
+            stalled = displacement < args.stall_distance * game.scale
+            dead_end_active = stalled and (dead_end > 0 or exits <= 1)
+            stutter_active = (
+                stalled and moving_cmds >= args.stall_window // 4)
+            passive_active = (
+                stalled and not dead_end_active and line < 0.35
+                and reach < 0.55 and risk < 0.35)
+        event_tracker.update_episode(
+            "stutter_stall", stutter_active, frames)
+        event_tracker.update_episode(
+            "dead_end_stall", dead_end_active, frames)
+        event_tracker.update_episode(
+            "passive_map_control", passive_active, frames)
+
         t0.forward, t0.backup = cmd[0], cmd[1]
         t0.turn_left, t0.turn_right = cmd[2], cmd[3]
         t0.fire = cmd[4]
@@ -288,6 +327,7 @@ def observe_round(policy, seed, args):
 
     if high_risk_frames >= args.good_dodge_frames and true_result != "loss":
         strengths["bullet_dodge_good"] += 1
+    event_tracker.finish(frames)
 
     payload = {
         "seed": seed,
@@ -301,6 +341,7 @@ def observe_round(policy, seed, args):
         "death_cause": tracker.death_cause,
         "kill_type": tracker.kill_type,
         "issues": dict(issues),
+        "event_metrics": event_tracker.summary(),
         "issue_frames": {
             key: value[:args.max_issue_frames]
             for key, value in issue_frames.items() if value
@@ -312,6 +353,11 @@ def observe_round(policy, seed, args):
             policy, "correction_counts", {})),
         "search_counts": dict(getattr(policy, "search_counts", {})),
         "search_frames": int(getattr(policy, "search_frames", 0)),
+        "sequence_searches": int(getattr(policy, "sequence_searches", 0)),
+        "sequence_candidates": int(getattr(
+            policy, "sequence_candidates", 0)),
+        "intent_frames": int(getattr(policy, "intent_frames", 0)),
+        "intent_interrupts": int(getattr(policy, "intent_interrupts", 0)),
     }
     payload["notes"] = _summarize_notes(issues, strengths)
     labelled = []
@@ -321,6 +367,34 @@ def observe_round(policy, seed, args):
 
 
 def _make_policy(args):
+    if args.temporal_sequence_teacher:
+        from training.temporal_sequence_teacher import (
+            ExactTemporalSequencePolicy,
+        )
+        return ExactTemporalSequencePolicy(
+            base_net=args.net,
+            value_net=args.p27b_net,
+            fire_margin=args.fire_margin,
+            top_k=args.temporal_top_k,
+            search_horizon=args.temporal_search_horizon,
+            search_samples=1,
+            search_death_penalty=0.18,
+            search_dd_penalty=0.45,
+            search_kill_bonus=0.05,
+            search_max_death=0.0,
+            search_max_dd=0.0,
+            successor_shield=True,
+            successor_horizon=args.temporal_search_horizon,
+            successor_shield_max_safe_roots=2,
+            suppress_secured_fire=True,
+            min_unsecured_fire_gain=2.0,
+            intent_chunk_frames=args.temporal_intent_chunk_frames,
+            root_beam=args.temporal_root_beam,
+            continuation_beam=args.temporal_continuation_beam,
+            fire_tail_horizon=args.temporal_fire_tail_horizon,
+            value_tolerance=args.temporal_value_tolerance,
+            commit_safety_horizon=args.temporal_commit_safety_horizon,
+        )
     if args.progressive_risk_mpc:
         from training.progressive_risk_mpc_teacher import (
             ProgressiveRiskMPCPolicy,
@@ -508,6 +582,15 @@ def run(args):
     correction_counts = Counter()
     search_counts = Counter()
     search_frames = 0
+    behavior_events = Counter()
+    behavior_durations = Counter()
+    fire_response_count = 0
+    fire_response_total = 0
+    action_frames = 0
+    sequence_searches = 0
+    sequence_candidates = 0
+    intent_frames = 0
+    intent_interrupts = 0
     shots = 0
     kills = 0
     frames = 0
@@ -519,6 +602,17 @@ def run(args):
         correction_counts.update(item.get("correction_counts", {}))
         search_counts.update(item.get("search_counts", {}))
         search_frames += item.get("search_frames", 0)
+        event_metrics = item.get("event_metrics", {})
+        behavior_events.update(event_metrics.get("events", {}))
+        behavior_durations.update(event_metrics.get("durations", {}))
+        fire_response_count += event_metrics.get("fire_response_count", 0)
+        fire_response_total += event_metrics.get(
+            "fire_response_total_frames", 0)
+        action_frames += event_metrics.get("action_frames", 0)
+        sequence_searches += item.get("sequence_searches", 0)
+        sequence_candidates += item.get("sequence_candidates", 0)
+        intent_frames += item.get("intent_frames", 0)
+        intent_interrupts += item.get("intent_interrupts", 0)
         shots += item["shots"]
         kills += item["kills"]
         frames += item["frames"]
@@ -527,6 +621,7 @@ def run(args):
         "net": args.net,
         "p27b_net": args.p27b_net,
         "p30_net": args.p30_net,
+        "temporal_sequence_teacher": args.temporal_sequence_teacher,
         "macro_net": args.macro_net,
         "macro_mode": args.macro_mode,
         "n": args.n,
@@ -586,12 +681,32 @@ def run(args):
         "hit_rate": kills / max(1, shots),
         "avg_seconds": frames / total / 25.0,
         "issues": dict(issues),
+        "behavior_events": dict(behavior_events),
+        "behavior_event_durations": dict(behavior_durations),
+        "fire_window_capture_rate": (
+            behavior_events["captured_fire_window"]
+            / max(1, behavior_events["fire_window"])),
+        "mean_fire_response_frames": (
+            fire_response_total / max(1, fire_response_count)),
+        "movement_switches_per_1000_frames": (
+            1000.0 * behavior_events["movement_switch"]
+            / max(1, action_frames)),
+        "turn_reversals_per_1000_frames": (
+            1000.0 * behavior_events["turn_reversal"]
+            / max(1, action_frames)),
+        "throttle_reversals_per_1000_frames": (
+            1000.0 * behavior_events["throttle_reversal"]
+            / max(1, action_frames)),
         "strengths": dict(strengths),
         "macro_counts": dict(macro_counts),
         "assist_counts": dict(assist_counts),
         "correction_counts": dict(correction_counts),
         "search_counts": dict(search_counts),
         "search_frames": int(search_frames),
+        "sequence_searches": int(sequence_searches),
+        "sequence_candidates": int(sequence_candidates),
+        "intent_frames": int(intent_frames),
+        "intent_interrupts": int(intent_interrupts),
         "round_log": args.out,
     }
     if args.summary:
@@ -650,6 +765,16 @@ def main():
     parser.add_argument("--suppress-blind-fire-line", type=float, default=0.0)
     parser.add_argument("--p27b-net", default=None)
     parser.add_argument("--p30-net", default=None)
+    parser.add_argument("--temporal-sequence-teacher", action="store_true")
+    parser.add_argument("--temporal-top-k", type=int, default=12)
+    parser.add_argument("--temporal-search-horizon", type=int, default=72)
+    parser.add_argument("--temporal-intent-chunk-frames", type=int, default=8)
+    parser.add_argument("--temporal-root-beam", type=int, default=4)
+    parser.add_argument("--temporal-continuation-beam", type=int, default=3)
+    parser.add_argument("--temporal-fire-tail-horizon", type=int, default=375)
+    parser.add_argument("--temporal-value-tolerance", type=float, default=1.0)
+    parser.add_argument("--temporal-commit-safety-horizon", type=int,
+                        default=48)
     parser.add_argument("--p30-override-threshold", type=float, default=0.72)
     parser.add_argument("--p30-background-override-threshold", type=float,
                         default=0.84)

@@ -3,7 +3,9 @@ import unittest
 from training.diagnose_sparse_exact_handoff import controls_to_action
 from training.sparse_exact_safety_policy import (
     exceeded_nonwin_gate,
+    movement_only_action,
     parse_seeds,
+    should_trigger_key_search,
     should_arm_narrow_replan,
 )
 
@@ -41,6 +43,14 @@ class SparseExactSafetyPolicyTest(unittest.TestCase):
         self.assertFalse(exceeded_nonwin_gate(rows, -1))
         self.assertFalse(exceeded_nonwin_gate(rows, 2))
         self.assertTrue(exceeded_nonwin_gate(rows, 1))
+
+    def test_fire_is_not_part_of_committed_movement(self):
+        self.assertEqual(movement_only_action((2, 0, 1)), (2, 0, 0))
+
+    def test_key_search_is_limited_to_fire_or_danger(self):
+        self.assertTrue(should_trigger_key_search((1, 1, 1), 0.0, 0.18))
+        self.assertTrue(should_trigger_key_search((1, 1, 0), 0.20, 0.18))
+        self.assertFalse(should_trigger_key_search((1, 1, 0), 0.10, 0.18))
 
 
 if __name__ == "__main__":

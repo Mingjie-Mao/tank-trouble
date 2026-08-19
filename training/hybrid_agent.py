@@ -122,7 +122,7 @@ class HybridPolicy:
         if not me.alive:
             return {}
         if not game.tanks[1].alive:
-            from training.killfield_fast_distill import \
+            from training.killfield_post_kill import \
                 post_kill_survival_scores
             scores = post_kill_survival_scores(game, horizon=75)
             selected = CANDIDATES[int(np.argmax(scores))]

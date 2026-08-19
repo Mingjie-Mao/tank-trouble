@@ -78,6 +78,115 @@ def prefer_nonfire_low_gain(rows, best_index, min_gain):
     return best_index
 
 
+def candidate_movement(index):
+    """CANDIDATES is ordered movement*2 + fire, so movement is index // 2."""
+    return int(index) // 2
+
+
+def prefer_movement_continuity(rows, best_index, current_movement,
+                               epsilon=0.0):
+    """Keep the movement already being executed when the values are near-tied.
+
+    ``exact_root_search`` scores every root independently and has no term for
+    what the tank was doing on the previous frame, so each search re-picks from
+    scratch.  Measured on the 120-round DAgger collection that costs a 37%
+    movement-switch rate on search frames (45.7% on the fixed-interval
+    proactive searches) against 3.4% on non-search frames, with a median action
+    run of 4 frames.  That is the visible stutter.
+
+    Safety argument: this only ever returns an index that is already
+    ``allowed``, and only when its value is within ``epsilon`` of the best
+    allowed value.  It cannot promote an action the exact rollout rejected, and
+    it never changes the fire decision -- alternatives must carry the same fire
+    bit as ``best_index``, because firing is owned by the long-tail check and
+    the two nonfire preferences, not by this function.
+
+    ``epsilon`` is in raw value units.  For scale, ``death_penalty *
+    SCORE_SCALE`` is 180 for the default 0.18, i.e. the value cost of certain
+    death, so epsilon must stay orders of magnitude below that.  Default 0.0
+    disables the preference entirely.
+    """
+    if best_index is None or current_movement is None or epsilon <= 0.0:
+        return best_index
+    best_index = int(best_index)
+    if candidate_movement(best_index) == int(current_movement):
+        return best_index
+    best = next(row for row in rows if int(row["index"]) == best_index)
+    best_fire = CANDIDATES[best_index][2]
+    alternatives = [
+        row for row in rows
+        if (row["allowed"]
+            and candidate_movement(row["index"]) == int(current_movement)
+            and CANDIDATES[int(row["index"])][2] == best_fire
+            and row["value"] >= best["value"] - float(epsilon))
+    ]
+    if not alternatives:
+        return best_index
+    return int(max(alternatives, key=lambda row: row["value"])["index"])
+
+
+def _movement_only(action):
+    throttle, turn, _ = action
+    return throttle, turn, 0
+
+
+def choose_unsafe_fallback(rows, proposed_action, mode="least_bad"):
+    """Pick an action for the frame where the exact search found no safe root.
+
+    The original fallback was ``action = action or proposed_action``: when
+    ``_search`` returns ``None`` the policy executes the *unevaluated* network
+    proposal, fire bit included, and the long-tail self-hit check is skipped
+    entirely because it only runs on a non-None search result.
+
+    Seed 970252 is that hole firing.  In 11 policy frames it recorded 11
+    searches, 11 ``no_safe_search_action`` events, ``long_tail_fire_checks``
+    stuck at 0 -- and ``shots = 1``.  Incoming risk went 0.0 -> 0.74 between
+    frame 0 and frame 1, i.e. its own bullet.  It died to itself having never
+    run the check that exists to prevent exactly that.
+
+    Three modes, deliberately separable because bundling them hid a
+    regression on the first A/B:
+
+    ``proposed``
+        Original behaviour.  Kept for comparison.
+    ``strip_fire``
+        Minimal fix: keep the network's movement, drop only the fire bit
+        (unless an evaluated row for that exact action predicts a kill).  With
+        no safe root available, firing adds a bullet that can return and kill
+        us while being unable to help unless it connects -- but the network's
+        *movement* prior is left alone.
+    ``least_bad``
+        ``strip_fire`` plus: replace the movement with the highest-value row
+        the search already evaluated.  More informed in principle, but on the
+        10-seed permanent gate it fixed 970252 (self-kill -> win) and broke
+        970243 (win -> loss), i.e. net zero.  Overriding the learned movement
+        prior with argmax-value over a set where *every* option is doomed is
+        not obviously right.
+    """
+    if mode not in ("least_bad", "strip_fire"):
+        return proposed_action
+    candidates = [row for row in rows
+                  if row.get("value") is not None
+                  and row.get("index") is not None]
+    if mode == "strip_fire":
+        if proposed_action[2] == 0:
+            return proposed_action
+        kill = max(
+            (float(row.get("kill") or 0.0) for row in candidates
+             if CANDIDATES[int(row["index"])] == tuple(proposed_action)),
+            default=0.0)
+        return (proposed_action if kill >= 1.0
+                else _movement_only(proposed_action))
+    if not candidates:
+        # Nothing was evaluated; keep the proposal but never blind-fire on it.
+        return _movement_only(proposed_action)
+    best = max(candidates, key=lambda row: row["value"])
+    action = CANDIDATES[int(best["index"])]
+    if action[2] == 1 and float(best.get("kill") or 0.0) < 1.0:
+        return _movement_only(action)
+    return action
+
+
 def exact_root_search(
         game,
         analyzer,
@@ -195,6 +304,8 @@ class ExactStatePriorGuidedMPC(P28PriorSearchPolicy):
     def __init__(self, *args, successor_shield=True,
                  successor_horizon=None, successor_shield_max_safe_roots=2,
                  suppress_secured_fire=True, min_unsecured_fire_gain=2.0,
+                 movement_continuity_epsilon=0.0,
+                 unsafe_fallback_mode="strip_fire",
                  **kwargs):
         kwargs.setdefault("search_max_death", 0.0)
         kwargs.setdefault("search_max_dd", 0.0)
@@ -206,9 +317,18 @@ class ExactStatePriorGuidedMPC(P28PriorSearchPolicy):
             successor_shield_max_safe_roots)
         self.suppress_secured_fire = bool(suppress_secured_fire)
         self.min_unsecured_fire_gain = float(min_unsecured_fire_gain)
+        self.movement_continuity_epsilon = float(
+            movement_continuity_epsilon)
+        self.unsafe_fallback_mode = str(unsafe_fallback_mode)
 
     def reset(self):
         super().reset()
+        # Movement executed on the previous frame.  Callers that know the
+        # truly executed action (the sparse policy can have it replaced by the
+        # long-tail fire check) overwrite this; otherwise _search tracks its
+        # own last choice, which still covers search-to-search continuity.
+        self.continuity_movement = None
+        self.movement_continuity_holds = 0
         self.exact_searches = 0
         self.exact_candidates = 0
         self.successor_shield_checks = 0
@@ -298,6 +418,14 @@ class ExactStatePriorGuidedMPC(P28PriorSearchPolicy):
             self.low_gain_fire_suppressions += 1
             self._fb_count("low_gain_fire_suppressed")
             interventions.append("low_gain_fire_suppressed")
+        original_best = best_index
+        best_index = prefer_movement_continuity(
+            rows, best_index, self.continuity_movement,
+            self.movement_continuity_epsilon)
+        if best_index != original_best:
+            self.movement_continuity_holds += 1
+            self._fb_count("movement_continuity_hold")
+            interventions.append("movement_continuity_hold")
         shield_triggered = False
         viable = {}
         successor_details = {}
@@ -329,6 +457,20 @@ class ExactStatePriorGuidedMPC(P28PriorSearchPolicy):
             if best_index != original_best:
                 self.successor_rejections += 1
                 interventions.append("successor_shield_override")
+            # The shield re-picks by raw value, which would discard the
+            # continuity preference applied above, so re-apply it inside the
+            # viable set.  Same safety argument: viable_rows are already
+            # allowed *and* successor-viable.  Attributed after the shield
+            # bookkeeping so it cannot be miscounted as a shield override.
+            if best_index is not None:
+                shield_best = best_index
+                best_index = prefer_movement_continuity(
+                    viable_rows, best_index, self.continuity_movement,
+                    self.movement_continuity_epsilon)
+                if best_index != shield_best:
+                    self.movement_continuity_holds += 1
+                    self._fb_count("movement_continuity_hold")
+                    interventions.append("movement_continuity_hold")
         if best_index is None:
             self._fb_count("no_safe_search_action")
             if shield_triggered:
@@ -397,6 +539,7 @@ class ExactStatePriorGuidedMPC(P28PriorSearchPolicy):
             "top": ordered[:3],
         })
         self._fb_count("searched")
+        self.continuity_movement = candidate_movement(best_index)
         return CANDIDATES[best_index]
 
     def act(self, game):

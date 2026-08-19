@@ -42,8 +42,15 @@ training/analysis/runs/*
 # 私人对话导出: 与 restored_session_*.md 同类, 含全部用户原话, 勿公开
 docs/CLAUDE_CODE_COMPLETE_CONTEXT.md
 
-# 第三方可执行文件 (他人作品, 非本项目产物)
+# 第三方可执行文件 / 二进制分发 (他人作品, 非本项目产物)
 *.exe
+# 下载的第三方 wheel, 含 Linux aarch64 的 torch, 约 97MB。
+# 依赖靠 pip 装, 不进仓库。
+wheels/
+
+# 个人文件: 简历与 Word 临时锁文件。与 restored_session_*.md 同类, 勿公开。
+*.docx
+.~*.docx
 
 # 训练/蒸馏数据集 (可由脚本重新生成, 合计约 80MB)
 training/flywheel_value_data/
@@ -53,7 +60,29 @@ training/killfield_full_data/
 training/killfield_distill_short/
 training/opponent_space_data/
 training/exploit_paths_backup/
+training/temporal_intent_data/
 
 # 回放与实验产物
+# training/*.npz 只匹配 training/ 直接子文件, 管不到子目录, 故补一条递归规则。
 training/*.npz
+training/**/*.npz
 training/logs/*.log
+
+# 分析产物: 批量运行输出不进仓库, 但文档引用到的报告保留。
+training/analysis/live/
+training/analysis/dagger/*
+!training/analysis/dagger/collect_round1.json
+
+# Browser arena run output. The champion regression set is tracked because the
+# flywheel reads it back; sweep, blind and failure dumps are per-run artefacts
+# that would otherwise add tens of thousands of lines of JSON per experiment.
+web/data/blind/
+web/data/failures/
+web/data/regression/*.json
+!web/data/regression/tactical-champion.json
+
+# Run output under training/analysis/. That directory tracks written analysis
+# (.md) and the scripts that produce it (.py); the JSON dumps and .partial
+# streams are per-run and can be regenerated.
+training/analysis/**/*.json
+training/analysis/**/*.jsonl

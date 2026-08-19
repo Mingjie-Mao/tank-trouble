@@ -70,6 +70,11 @@ FAILED_FIRE_PENALTY = 260.0
 SUICIDE_FIRE_PENALTY = 2_500.0
 RISK_WEIGHT = 320.0
 NO_EFFECT_REPEAT_PENALTY = 600.0
+# 击杀后窗口的两项世界模型补全, 见 docs/P41_POSTKILL_OBJECTIVE_FLATNESS.md。
+# 取值沿用被删掉的状态机里那套已验证的打分, 只是折进统一的 rollout。
+POST_KILL_CLEARANCE_WEIGHT = 40.0
+POST_KILL_MOBILITY_WEIGHT = 0.5
+POST_KILL_CLEARANCE_CAP = 8.0
 MOVING_FIRE_SCORE = -1.0e9
 OWN_BULLET_GUARD_HORIZON = 24
 VALUE_LEAF_WEIGHT = 300.0   # 与塑形项同量级；见 density_rollout 注释
@@ -589,6 +594,8 @@ def density_rollout(game, action, field, rng_seed, chain_state=None,
         enemy.turn_left, enemy.turn_right = turn == 0, turn == 2
         enemy.fire = fire == 1
     start_cell = _cell(sandbox, me)
+    start_x, start_y = me.x, me.y
+    post_kill_clearance = POST_KILL_CLEARANCE_CAP
     start_value = field.value_at(start_cell)
     start_relative = field.relative_success_at(start_cell)
     start_alignment, _, start_concentration = _alignment(field, sandbox, me)
@@ -628,6 +635,17 @@ def density_rollout(game, action, field, rng_seed, chain_state=None,
             if kill_score is None:
                 kill_score = (ACTIVE_KILL_SCORE - 8.0 * frame if active_hit
                               else OPPONENT_SELF_SCORE - 2.0 * frame)
+            # 这 75 帧里唯一的威胁就是还在飞的子弹, 它不分敌我且能活 250 帧。
+            # incoming_risk 只在预测弹道落进命中半径时才非零, 是个 0/1 阶跃;
+            # 擦身而过与隔着半张地图同分, 于是击杀后目标函数塌成一张平面。
+            # 这里记连续的最近距离, 补的是世界模型, 不是给 AI 加战术规则。
+            for bullet in sandbox.bullets:
+                if bullet.removed:
+                    continue
+                post_kill_clearance = min(
+                    post_kill_clearance,
+                    math.hypot(bullet.x - me.x, bullet.y - me.y)
+                    / max(sandbox.scale, 1e-6))
             continue
 
         chain.advance()
@@ -648,9 +666,21 @@ def density_rollout(game, action, field, rng_seed, chain_state=None,
         # 活着走完了窗口。击杀分照给，但仍要扣掉此刻承受的来袭火力——
         # 原来的早退把这一项整个跳过了，于是"杀完停在弹道上"和"杀完躲
         # 进安全格"得分完全一样，AI 自然没有理由去躲。
+        #
+        # 只扣 incoming_risk 还不够: 它是阶跃的, 而且场上没有子弹时对每个
+        # 候选都恒为 0, 十个候选会精确并列在 OPPONENT_SELF_SCORE 上, 坦克
+        # 在原地当 75 帧雕像。补两项连续量: 离飞行弹的最近距离(有弹时给出
+        # 安全梯度), 以及位移(无弹时打破并列——在迷宫里保持机动而不是站死)。
         analyzer = OpportunityAnalyzer360(sandbox)
-        return float(kill_score
-                     - RISK_WEIGHT * analyzer.incoming_risk(sandbox))
+        displacement = math.hypot(me.x - start_x, me.y - start_y) \
+            / max(sandbox.scale, 1e-6)
+        return float(
+            kill_score
+            - RISK_WEIGHT * analyzer.incoming_risk(sandbox)
+            + POST_KILL_CLEARANCE_WEIGHT * min(
+                post_kill_clearance, POST_KILL_CLEARANCE_CAP)
+            + POST_KILL_MOBILITY_WEIGHT * min(
+                displacement, POST_KILL_CLEARANCE_CAP))
 
     end_alignment, _, end_concentration = _alignment(field, sandbox, me)
     score = FIELD_ASCENT_WEIGHT * field_ascent
@@ -789,7 +819,7 @@ class KillFieldTeacher:
             # Re-evaluate all no-fire motions against the live bullet set and
             # execute the safest one.  This is a narrow physics shield, not a
             # new navigation objective.
-            from training.killfield_fast_distill import \
+            from training.killfield_post_kill import \
                 post_kill_survival_scores
             safety_scores = post_kill_survival_scores(
                 game, OWN_BULLET_GUARD_HORIZON)

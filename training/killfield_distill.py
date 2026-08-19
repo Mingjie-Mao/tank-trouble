@@ -17,6 +17,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from training.killfield_post_kill import SCORE_SCALE
 from training.killfield_student import (
     P37_OBS_DIM,
     KillFieldFeatureState,
@@ -44,7 +45,6 @@ DEFAULT_DATA_DIR = os.path.join(HERE, "killfield_distill_short")
 DEFAULT_MODEL = os.path.join(HERE, "models", "p37_killfield_student_short.pt")
 DEFAULT_WARMSTART = os.path.join(
     HERE, "models", "p29c_feature_only_actor_iter02.pt")
-SCORE_SCALE = 12_000.0
 FORCED_FIRE_INDEX = CANDIDATES.index((1, 1, 1))
 
 

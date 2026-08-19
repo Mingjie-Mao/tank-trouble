@@ -421,6 +421,31 @@ class P27BRiskValuePolicy:
         self.context_positions = deque(maxlen=51)
         self.context_distances = deque(maxlen=51)
         self.last_context = np.zeros(P29C_CONTEXT_DIM, dtype=np.float32)
+        # Deployment telemetry.  These fields are read by the fair online
+        # search wrapper; they do not participate in P27b's action choice.
+        self.last_ranked_actions = []
+        self.last_action_values = None
+        self.last_metrics = None
+        self.last_action = None
+
+    def _remember_action_ranking(self, outputs, metrics):
+        """Expose P27b's final action order without changing its policy.
+
+        The deployed P27b call below invokes ``select_action`` with every
+        auxiliary coefficient set to zero.  Consequently its final ordering
+        is the adjusted score head plus the existing fire-margin mask.  The
+        hybrid uses exactly that ordering as a search prior.
+        """
+        score = np.asarray(outputs["score"], dtype=np.float32).copy()
+        paired = score.reshape(9, 2)
+        fire_ok = (paired[:, 1] - paired[:, 0]) > self.fire_margin
+        for movement in range(9):
+            if not fire_ok[movement]:
+                score[movement * 2 + 1] = -1e9
+        order = np.argsort(score)[::-1]
+        self.last_action_values = score
+        self.last_ranked_actions = [self.candidates[int(i)] for i in order]
+        self.last_metrics = np.asarray(metrics, dtype=np.float32).copy()
 
     def _count(self, name):
         self.assist_counts[name] = self.assist_counts.get(name, 0) + 1
@@ -737,11 +762,13 @@ class P27BRiskValuePolicy:
         p27 = self._p27_value(stacked, context)
         outputs = self._adjust_outputs(
             outputs, category, p27, base_index, metrics)
+        self._remember_action_ranking(outputs, metrics)
         throttle, turn, fire = select_action(
             outputs, self.candidates, self.fire_margin, 0.0,
             0.0, 0.0, 0.0, 0.0, 0.0)
         if len(game.tanks) > 1 and not game.tanks[1].alive:
             fire = 0
+        self.last_action = (throttle, turn, fire)
         return {"forward": throttle == 2, "backup": throttle == 0,
                 "turn_left": turn == 0, "turn_right": turn == 2,
                 "fire": fire == 1}

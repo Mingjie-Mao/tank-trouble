@@ -1,3 +1,4 @@
+import math
 import unittest
 
 import numpy as np
@@ -23,6 +24,7 @@ from training.killfield_full_distill import (
     action_preview_features,
 )
 from training.coin_path_rules import neighbors
+from training.survival_expert_iter_530 import apply_action
 
 
 class InverseDensityFieldTests(unittest.TestCase):
@@ -126,6 +128,8 @@ class KillFieldTeacherTests(unittest.TestCase):
         self.assertEqual(teacher.last_action, (1, 1, 1))
 
     def test_post_kill_replans_survival_without_firing(self):
+        # 击杀后不再有独立的状态机, 同一个目标函数覆盖回合两半, 所以这里
+        # 不断言 decision_kind 这种实现标签, 只断言可观察行为。
         game = Game(seed=37_500_009, ai_enabled=True)
         teacher = KillFieldTeacher(
             seed=29, ray_count=32, max_bounces=1, horizon=4, hold=2)
@@ -133,8 +137,54 @@ class KillFieldTeacherTests(unittest.TestCase):
         game.destroy_tank(1)
         action = teacher.act(game)
         self.assertFalse(action["fire"])
-        self.assertEqual(teacher.last_decision_kind, "post_kill_plan")
         self.assertIsNotNone(teacher.last_scores)
+
+    def test_post_kill_objective_is_not_flat(self):
+        """P41 回归守卫: 击杀后目标函数曾塌成一张平面。
+
+        当时 10 个候选里 9 个精确等于 OPPONENT_SELF_SCORE——incoming_risk 是
+        个 0/1 阶跃, 场上没有飞行弹时对每个候选恒为 0, argmax 在平面上乱选,
+        坦克 75 帧一动不动。见 docs/P41_POSTKILL_OBJECTIVE_FLATNESS.md。
+        """
+        for seed in (37_500_009, 37_500_002, 37_500_011):
+            with self.subTest(seed=seed):
+                game = Game(seed=seed, ai_enabled=True)
+                teacher = KillFieldTeacher(
+                    seed=29, ray_count=32, max_bounces=1, horizon=4, hold=2)
+                teacher.last_motion_action = (2, 0, 0)
+                game.destroy_tank(1)
+                scores = teacher.scores(game)
+                live = scores[np.isfinite(scores) & (scores > -1e8)]
+                self.assertEqual(len(live), 10)
+                ties = np.max(np.unique(
+                    np.round(live, 2), return_counts=True)[1])
+                # 塌陷时这里是 9。静止的三个转向候选位移与净空都相同,
+                # 并列是物理事实, 所以允许并列但不允许压倒性并列。
+                self.assertLessEqual(ties, 3)
+
+    def test_post_kill_window_keeps_the_tank_moving(self):
+        """塌陷的可观察后果是坦克变雕像, 这里直接量它走了多远。"""
+        for seed in (37_500_009, 37_500_002, 37_500_011):
+            with self.subTest(seed=seed):
+                game = Game(seed=seed, ai_enabled=True)
+                teacher = KillFieldTeacher(
+                    seed=29, ray_count=32, max_bounces=1, horizon=4, hold=2)
+                teacher.last_motion_action = (2, 0, 0)
+                game.destroy_tank(1)
+                me = game.tanks[0]
+                previous = (me.x, me.y)
+                travelled = 0.0
+                for _ in range(75):
+                    teacher.act(game)
+                    apply_action(game, teacher.last_action)
+                    game.step()
+                    travelled += math.hypot(
+                        me.x - previous[0], me.y - previous[1])
+                    previous = (me.x, me.y)
+                    if not me.alive:
+                        break
+                # 塌陷时三个种子分别只走了 0.34 / 0.45 / 0.97 格。
+                self.assertGreater(travelled / game.scale, 2.0)
 
     def test_original_round_end_timing_is_preserved(self):
         game = Game(seed=37_500_010, ai_enabled=True)

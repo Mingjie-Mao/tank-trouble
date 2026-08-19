@@ -29,7 +29,7 @@ import time
 
 import numpy as np
 
-from training.killfield_fast_distill import post_kill_survival_scores
+from training.killfield_post_kill import post_kill_survival_scores
 from training.killfield_teacher import (
     COMMIT_MOVE_FRAMES,
     COMMIT_TURN_FRAMES,
