@@ -9,8 +9,8 @@ test("browser runtime exposes the renderer state contract", () => {
 
   assert.equal(state.connected, true);
   assert.equal(state.fps, 25);
-  assert.equal(state.left_policy, "p27-js-tactical-v2");
-  assert.equal(state.available_policies[0].value, "p27-js-tactical-v2");
+  assert.equal(state.left_policy, "p27-js-tactical-v3");
+  assert.equal(state.available_policies[0].value, "p27-js-tactical-v3");
   assert.equal(state.right_policy, "laika-js");
   assert.equal(state.tanks.length, 2);
   assert.ok(state.walls.length > 0);

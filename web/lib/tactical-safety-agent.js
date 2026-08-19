@@ -100,11 +100,33 @@ function visibleBulletTwoStagePlan(game, horizon, splitFrames) {
         deathFrame: result.survived ? horizon + 1 : splitFrames + result.deathFrame,
         root: Array.from(root),
         continuation: Array.from(continuation),
+        rootFrames: splitFrames,
+        horizon,
       };
       if (best === null || betterVisible(candidate, best)) best = candidate;
     }
   }
   return best;
+}
+
+function verifyRemainingEvasionPlan(game, plan, horizon) {
+  const rootRemaining = Math.max(0, plan.rootFrames - plan.frame);
+  if (rootRemaining === 0) {
+    return visibleBulletRollout(game, plan.continuation, horizon);
+  }
+  const rootFrames = Math.min(rootRemaining, horizon);
+  const advanced = advanceVisibleBullets(game, plan.root, rootFrames);
+  if (!advanced.survived || rootFrames >= horizon) return advanced;
+  const result = continueVisibleBulletRollout(
+    advanced.sandbox,
+    plan.continuation,
+    Math.max(1, horizon - rootFrames),
+    advanced.minClearance,
+  );
+  return {
+    ...result,
+    deathFrame: result.survived ? horizon + 1 : rootFrames + result.deathFrame,
+  };
 }
 
 function advanceNoFire(game, action, frames) {
@@ -195,12 +217,17 @@ export class TacticalSafetyAgent extends KillFieldAgent {
     this.safetyHorizon = Number(options.safetyHorizon ?? 36);
     this.settlementSplit = Number(options.settlementSplit ?? 8);
     this.evasionSplit = Number(options.evasionSplit ?? 4);
+    this.persistEvasionPlan = Boolean(options.persistEvasionPlan ?? false);
     this.tacticalAudits = 0;
     this.tacticalOverrides = 0;
     this.settlementPlans = 0;
     this.settlementPlan = null;
     this.settlementFrame = 0;
     this.auditMs = [];
+    this.evasionPlan = null;
+    this.evasionPlanStarts = 0;
+    this.evasionPlanFrames = 0;
+    this.evasionPlanReplans = 0;
   }
 
   emitVerifiedAction(game, action, kind) {
@@ -220,9 +247,13 @@ export class TacticalSafetyAgent extends KillFieldAgent {
 
   act(game) {
     const baseline = super.act(game);
-    if (!game.tanks[0].alive || game.frozen) return baseline;
+    if (!game.tanks[0].alive || game.frozen) {
+      this.evasionPlan = null;
+      return baseline;
+    }
 
     if (!game.tanks[1].alive) {
+      this.evasionPlan = null;
       if (this.settlementPlan === null) {
         this.settlementPlan = twoStageSettlementPlan(game, this.settlementSplit);
         this.settlementFrame = 0;
@@ -237,6 +268,30 @@ export class TacticalSafetyAgent extends KillFieldAgent {
         return this.emitVerifiedAction(game, action, "settlement_two_stage");
       }
       return baseline;
+    }
+
+    if (this.persistEvasionPlan && this.evasionPlan !== null) {
+      if (game.bullets.length === 0) {
+        this.evasionPlan = null;
+      } else {
+        // Always revalidate a fresh full horizon. New bullets can appear while
+        // the plan is running; shrinking the lookahead with the old plan's
+        // remaining frames creates a blind tail just before the plan ends.
+        const verified = verifyRemainingEvasionPlan(
+          game, this.evasionPlan, this.safetyHorizon,
+        );
+        if (verified.survived) {
+          const plan = this.evasionPlan;
+          const action = plan.frame < plan.rootFrames ? plan.root : plan.continuation;
+          plan.frame += 1;
+          this.evasionPlanFrames += 1;
+          if (plan.frame >= plan.horizon) this.evasionPlan = null;
+          this.commitRemaining = 0;
+          return this.emitVerifiedAction(game, action, "visible_bullet_plan_hold");
+        }
+        this.evasionPlan = null;
+        this.evasionPlanReplans += 1;
+      }
     }
 
     const risk = incomingRisk(game, this.boxes);
@@ -254,10 +309,22 @@ export class TacticalSafetyAgent extends KillFieldAgent {
       game, this.safetyHorizon, this.evasionSplit,
     );
     this.auditMs.push(performance.now() - started);
-    if (!twoStage?.survived || sameAction(twoStage.root, baseline)) return baseline;
+    if (!twoStage?.survived
+        || (!this.persistEvasionPlan && sameAction(twoStage.root, baseline))) return baseline;
 
     this.tacticalOverrides += 1;
     this.commitRemaining = 0;
+    if (this.persistEvasionPlan) {
+      this.evasionPlan = {
+        root: Array.from(twoStage.root),
+        continuation: Array.from(twoStage.continuation),
+        rootFrames: twoStage.rootFrames ?? this.evasionSplit,
+        horizon: twoStage.horizon ?? this.safetyHorizon,
+        frame: 1,
+      };
+      this.evasionPlanStarts += 1;
+      this.evasionPlanFrames += 1;
+    }
     return this.emitVerifiedAction(game, twoStage.root, "visible_bullet_two_stage");
   }
 
@@ -279,6 +346,10 @@ export class TacticalSafetyAgent extends KillFieldAgent {
       tacticalOverrides: this.tacticalOverrides,
       settlementPlans: this.settlementPlans,
       settlementPlan: settlement,
+      evasionPlanActive: this.evasionPlan !== null,
+      evasionPlanStarts: this.evasionPlanStarts,
+      evasionPlanFrames: this.evasionPlanFrames,
+      evasionPlanReplans: this.evasionPlanReplans,
       tacticalP95Ms: p95,
     };
   }

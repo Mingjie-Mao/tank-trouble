@@ -64,6 +64,9 @@ export function makeSandbox(game, oppModel = "L2", rngSeed = 0) {
   sb.settingsMaxBullets = game.settingsMaxBullets;
   sb.tanksCount = game.tanksCount;
   sb.aiFactory = null;
+  // The planner must roll forward under the same physics the real world uses;
+  // predicting a stop where the engine slides desynchronises the world model.
+  sb.wallSliding = game.wallSliding;
 
   // Hidden information scrubbed.
   sb.rng = new Rng(rngSeed);
@@ -94,6 +97,25 @@ export function makeSandbox(game, oppModel = "L2", rngSeed = 0) {
 
   if (oppModel === "L2") {
     sb.tanks[1].ai = new LaikaAI(sb, sb.tanks[1]);
+  } else if (oppModel === "L3") {
+    // Privileged. Instead of scrubbing the two pieces of hidden information,
+    // this keeps them: the live rng stream (so the rollout knows every future
+    // random draw) and the opponent's actual goal stack and queued actions (so
+    // it knows their current plan rather than inferring it). Not deployable and
+    // not fair play — it exists only to measure how much of the remaining gap
+    // is missing information rather than weaker search.
+    sb.rng.state = game.rng.state;
+    sb.rng.seed = game.rng.seed;
+    const live = game.tanks[1].ai;
+    const ai = new LaikaAI(sb, sb.tanks[1]);
+    if (live) {
+      ai.stuckTime = live.stuckTime;
+      ai.currentAggresiveness = live.currentAggresiveness;
+      ai.goalId = live.goalId;
+      ai.myGoal = { ...live.myGoal };
+      ai.myActions = live.myActions.map((action) => ({ ...action }));
+    }
+    sb.tanks[1].ai = ai;
   }
   return sb;
 }

@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { playLeagueGame } from "../lib/browser-league.js";
+import { playLeagueGame, playWatchGame } from "../lib/browser-league.js";
 
 function argument(name, fallback) {
   const index = process.argv.indexOf(`--${name}`);
@@ -16,13 +16,15 @@ const artifact = JSON.parse(await readFile(seedsPath, "utf8"));
 
 const games = [];
 for (const item of artifact.cases) {
-  const row = playLeagueGame({
-    candidate,
-    opponent: item.opponent,
-    candidateSide: item.candidateSide,
-    seed: item.seed,
-    maxFrames,
-  });
+  const row = item.mode === "watch"
+    ? playWatchGame({ candidate, seed: item.seed, maxFrames })
+    : playLeagueGame({
+      candidate,
+      opponent: item.opponent,
+      candidateSide: item.candidateSide,
+      seed: item.seed,
+      maxFrames,
+    });
   games.push({
     ...row,
     baselineOutcome: item.baselineOutcome,

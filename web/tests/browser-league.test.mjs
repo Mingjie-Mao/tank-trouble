@@ -22,6 +22,10 @@ test("league game records the candidate on either color", () => {
   assert.equal(right.candidateSide, 1);
   assert.equal(left.outcome, "draw");
   assert.equal(right.outcome, "draw");
+  assert.equal(left.winType, null);
+  assert.equal(typeof left.candidateFires, "number");
+  assert.equal(typeof left.movementSwitchesPer1000, "number");
+  assert.equal(typeof left.reversalsPer1000, "number");
 });
 test("league summary reports per-opponent color balance", () => {
   const report = runBrowserLeague({
@@ -36,4 +40,8 @@ test("league summary reports per-opponent color balance", () => {
   assert.equal(report.opponents["idle-js"].bySide.right.games, 2);
   assert.equal(report.opponents["idle-js"].draw, 4);
   assert.equal(report.opponents["idle-js"].colorGap, 0);
+  assert.equal(report.overall.activeWins, 0);
+  assert.equal(report.overall.passiveWins, 0);
+  assert.equal(typeof report.overall.fireOpportunityCaptureRate, "number");
+  assert.equal(typeof report.overall.plannedOpportunityFireRate, "number");
 });

@@ -79,6 +79,17 @@ export const TANK_BARREL_TIP_Y = (-TANK_TURRET_HEIGHT / 16.0) * 11.0; // -53.281
 export const TANK_SHAPE_BARREL_HALF_WIDTH = 8.5;
 export const TANK_SHAPE_BARREL_TIP_Y = -55.0;
 
+// ---- K4 wall-contact / wall-recovery physics ----
+// Vendored from upstream killfield (b04d8cf, b917682, d61408e). These govern
+// Game({ wallSliding: true }) only; with the flag off the engine keeps the
+// original Flash behaviour of cancelling a blocked substep outright.
+export const TANK_WALL_SLIDE_MIN_RETENTION = 0.70;
+export const TANK_WALL_SLIDE_MAX_RETENTION = 0.96;
+export const TANK_WALL_SLIDE_INCIDENCE_DRAG = 0.30;
+export const TANK_WALL_ALIGN_SPEED = 2.0; // maximum contact-induced deg/frame
+export const TANK_WALL_SEPARATION_BASE = 1.0; // px at reference scale
+export const TANK_WALL_SEPARATION_STEPS = 5;
+
 // Render-only. Bullets are treated as dimensionless points by the hit test.
 export const BULLET_VISUAL_RADIUS = 3.5;
 

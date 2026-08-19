@@ -2,12 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { BrowserArena } from "../lib/browser-arena.js";
+import { playWatchGame } from "../lib/browser-league.js";
 import { VisibleOpponentModel } from "../lib/visible-opponent-model.js";
 
 for (const policy of [
   "p27-js-tactical-dd-safe",
   "p27-js-tactical-opponent-model",
   "p27-js-tactical-combined",
+  "p27-js-tactical-safety-v2",
+  "p27-js-tactical-fire-shield-h10",
+  "p27-js-tactical-anti-stall",
+  "p27-js-tactical-plan",
 ]) {
   test(`${policy} runs as a hidden evaluation candidate`, () => {
     const arena = new BrowserArena({ seed: 2500042 });
@@ -21,6 +26,21 @@ for (const policy of [
     assert.equal(arena.state().left_policy, policy);
   });
 }
+
+test("Tactical Plan turns a known zero-fire passive win into an active kill", () => {
+  const baseline = playWatchGame({
+    candidate: "p27-js-tactical-v2", seed: 3300000, maxFrames: 1000,
+  });
+  const planned = playWatchGame({
+    candidate: "p27-js-tactical-plan", seed: 3300000, maxFrames: 1000,
+  });
+  assert.equal(baseline.outcome, "win");
+  assert.equal(baseline.winType, "passive_win");
+  assert.equal(baseline.zeroFireWin, true);
+  assert.equal(planned.outcome, "win");
+  assert.equal(planned.winType, "active_win");
+  assert.ok(planned.candidateFires > 0);
+});
 
 test("visible opponent model learns generic action persistence and transition", () => {
   const model = new VisibleOpponentModel({ minimumTransitions: 1 });
@@ -65,4 +85,27 @@ test("shot settlement audit repairs a real double death without a seed rule", ()
   assert.deepEqual(repaired.roundEnd, ["round_end", 0]);
   assert.ok(repaired.telemetry.unsafeShotsSuppressed >= 1);
   assert.ok(repaired.telemetry.shotAuditP95Ms < 15);
+});
+
+test("last-chance safety recovers a real visible-bullet loss without a seed rule", () => {
+  const play = (policy) => {
+    const arena = new BrowserArena({ seed: 2900207 });
+    arena.command({
+      action: "mode",
+      mode: "watch",
+      left_policy: policy,
+      right_policy: "laika-js",
+    });
+    for (let frame = 0; frame < 3000; frame += 1) {
+      arena.step(frame * 40);
+      const roundEnd = arena.lastEvents.find((event) => event[0] === "round_end");
+      if (roundEnd) return { roundEnd, telemetry: arena.leftAgent.telemetry() };
+    }
+    throw new Error("round did not finish");
+  };
+  assert.deepEqual(play("p27-js-tactical-v2").roundEnd, ["round_end", 1]);
+  const repaired = play("p27-js-tactical-safety-v2");
+  assert.deepEqual(repaired.roundEnd, ["round_end", 0]);
+  assert.ok(repaired.telemetry.lastChanceOverrides >= 1);
+  assert.ok(repaired.telemetry.lastChanceAuditP95Ms < 15);
 });

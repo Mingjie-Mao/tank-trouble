@@ -13,7 +13,7 @@ function cellOf(game, tank) {
   return [Math.floor(tank.x / game.scale), Math.floor(tank.y / game.scale)];
 }
 
-function topologicalDistance(game) {
+export function topologicalDistance(game) {
   const [mx, my] = cellOf(game, game.tanks[0]);
   const [ex, ey] = cellOf(game, game.tanks[1]);
   return game.distMap(mx, my)?.[ex]?.[ey] ?? Infinity;
@@ -219,6 +219,79 @@ export function movingAimInterceptPlan(
 }
 
 /**
+ * Small field-guided version of the intercept search for ordinary combat.
+ * The inverse field supplies the useful heading, so this evaluates a narrow
+ * exact neighbourhood instead of scanning every turn/lead combination.
+ */
+export function fieldGuidedAimCandidates(game, field) {
+  const me = game.tanks[0];
+  if (!(me.alive && game.tanks[1].alive && me.triggerReleased
+      && game.weaponReady(me) && field)) return [];
+  const heading = (me.rotation - 90) * (Math.PI / 180);
+  const [aim] = field.bestAimAt(cellOf(game, me), heading);
+  if (aim === null) return [];
+  const targetRotation = ((aim * 180) / Math.PI + 90 + 360) % 360;
+  const delta = signedAngleDelta(targetRotation, me.rotation);
+  const firstTurn = delta < 0 ? 0 : 2;
+  const secondTurn = firstTurn === 0 ? 2 : 0;
+  const centre = Math.round(Math.abs(delta) / Math.max(me.turnSpeed, 1e-6));
+  const candidates = [{
+    firstTurn: 1, firstTurnFrames: 0, secondTurn: 1, secondTurnFrames: 0,
+  }];
+  const seen = new Set(["1,0,1,0"]);
+  const add = (candidate) => {
+    const key = `${candidate.firstTurn},${candidate.firstTurnFrames},${candidate.secondTurn},${candidate.secondTurnFrames}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push(candidate);
+  };
+  for (let offset = -3; offset <= 3; offset += 1) {
+    const frames = Math.max(1, Math.min(18, centre + offset));
+    add({ firstTurn, firstTurnFrames: frames, secondTurn: 1, secondTurnFrames: 0 });
+  }
+  // A small symmetric lead/counter neighbourhood handles visible target
+  // motion without restoring the full 80+ candidate exhaustive scan.
+  for (const lead of [4, 8]) {
+    const firstTurnFrames = Math.min(24, Math.max(1, centre + lead));
+    for (const counterOffset of [-1, 0, 1]) {
+      const secondTurnFrames = Math.max(1, lead + counterOffset);
+      add({ firstTurn, firstTurnFrames, secondTurn, secondTurnFrames });
+    }
+  }
+  return candidates;
+}
+
+export function evaluateAimInterceptCandidate(
+  game, candidate, horizon = INTERCEPT_HORIZON, behaviorModel = null,
+) {
+  return simulateAimIntercept(
+    game,
+    candidate.firstTurn,
+    candidate.firstTurnFrames,
+    candidate.secondTurn,
+    candidate.secondTurnFrames,
+    horizon,
+    behaviorModel,
+  );
+}
+
+export function fieldGuidedAimInterceptPlan(
+  game, field, horizon = INTERCEPT_HORIZON, behaviorModel = null,
+) {
+  const candidates = fieldGuidedAimCandidates(game, field);
+  let best = null;
+  for (const candidate of candidates) {
+    const result = evaluateAimInterceptCandidate(
+      game, candidate, horizon, behaviorModel,
+    );
+    if (!(result.hit && result.survived)) continue;
+    if (best === null || result.frame < best.frame
+        || (result.frame === best.frame && result.bounces < best.bounces)) best = result;
+  }
+  return best;
+}
+
+/**
  * Search a tiny two-stage, no-fire manoeuvre when a topology chase wedges the
  * tank against a wall. The score deliberately values an immediate pose change
  * before long-range progress: an escape plan must first prove that its root
@@ -267,7 +340,7 @@ function localEscapePlan(game) {
   return best;
 }
 
-function chaseAction(game, targetCell = null) {
+export function chaseAction(game, targetCell = null) {
   const me = game.tanks[0];
   const enemy = game.tanks[1];
   const [mx, my] = cellOf(game, me);
@@ -321,6 +394,10 @@ export class TacticalV2Agent extends TacticalSafetyAgent {
     this.interceptPlan = null;
     this.nextInterceptScanFrame = 0;
     this.opponentBehavior = options.opponentBehavior ?? null;
+    this.preserveAttackIntentDuringBullets = Boolean(
+      options.preserveAttackIntentDuringBullets ?? false,
+    );
+    this.suspendedAttackFrames = 0;
   }
 
   resetProgress(game) {
@@ -355,10 +432,16 @@ export class TacticalV2Agent extends TacticalSafetyAgent {
 
     // v1 remains authoritative while any live projectile is already visible.
     if (game.bullets.length > 0) {
-      this.chaseRemaining = 0;
-      this.chaseTarget = null;
+      if (!this.preserveAttackIntentDuringBullets) {
+        this.chaseRemaining = 0;
+        this.chaseTarget = null;
+      } else if (this.chaseRemaining > 0 || this.chaseTarget !== null) {
+        this.suspendedAttackFrames += 1;
+      }
       this.escapePlan = null;
       this.escapeFrame = 0;
+      // A partially executed aim sequence cannot be resumed at the old frame,
+      // but the higher-level chase target survives and can be reacquired.
       this.interceptPlan = null;
       return baseline;
     }
@@ -496,6 +579,7 @@ export class TacticalV2Agent extends TacticalSafetyAgent {
       interceptFires: this.interceptFires,
       interceptCancelled: this.interceptCancelled,
       stationaryShotsSuppressed: this.stationaryShotsSuppressed,
+      suspendedAttackFrames: this.suspendedAttackFrames,
       bestTopologicalDistance: this.bestDistance,
       ...(this.opponentBehavior?.telemetry() ?? {}),
     };

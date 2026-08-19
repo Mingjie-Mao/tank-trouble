@@ -14,12 +14,17 @@
  * nothing to build once per round and reuse every frame.
  */
 
+// Anything the planner reads off the game must appear here. `wallSliding` in
+// particular: it is read by makeSandbox to configure rollout physics, so
+// omitting it makes a mirrored agent plan under the original collision model
+// while the real world slides — a world-model mismatch that is invisible on
+// the unmirrored side.
 const PASSTHROUGH = [
   "maze", "walls", "wallHalfT", "scale", "wallGrid", "distancesForMaze",
   "deadEnds", "reachable", "reachableIndex", "settingsMaxBullets",
   "tanksCount", "aiFactory", "rng", "bullets", "tankFields", "events",
   "frame", "aliveCount", "endCount", "resetCount", "frozen", "shake",
-  "crateTimer", "bulletDepth", "roundNumber",
+  "crateTimer", "bulletDepth", "roundNumber", "wallSliding",
 ];
 
 export function mirrorView(realGame) {

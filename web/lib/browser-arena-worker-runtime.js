@@ -22,7 +22,14 @@ export class BrowserArenaWorkerRuntime {
   handle(message) {
     if (message?.type === "init") {
       this.stop();
-      this.arena = new BrowserArena({ seed: Number(message.seed ?? 970000) });
+      this.arena = new BrowserArena({
+        seed: Number(message.seed ?? 970000),
+        // K4 wall-contact physics is a property of the world, not of a
+        // policy, so the deployed arena runs it for both tanks. The library
+        // default stays false so every frozen baseline and the Python port
+        // fidelity checks keep describing the original collision model.
+        wallSliding: true,
+      });
       const state = this.arena.state();
       this.emit({ type: "state", state });
       if (message.autostart !== false) this.start();

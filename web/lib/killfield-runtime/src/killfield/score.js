@@ -22,6 +22,29 @@ for (let throttle = 0; throttle <= 2; throttle++) {
   }
 }
 
+/**
+ * K1 fire continuation plans.
+ *
+ * A no-fire plan holds one control for the whole horizon. A fire plan presses
+ * the trigger while stationary for exactly the first simulated frame, then
+ * follows one of the same nine no-fire controls. Every fire plan maps to the
+ * same real first action; the continuations answer whether firing now still
+ * leaves a good move on the next frame. The legacy rollout could not express
+ * that — it charged a shot as though the tank then stood still for 36 frames.
+ */
+export const NO_FIRE_ACTIONS = CANDIDATES.filter((action) => action[2] === 0);
+export const STATIONARY_FIRE_ACTION = CANDIDATES.find(
+  (action) => action[0] === 1 && action[1] === 1 && action[2] === 1,
+);
+export const ROLLOUT_PLANS = [
+  ...NO_FIRE_ACTIONS.map((action) => ({
+    firstAction: action, continuationAction: null, kind: "move",
+  })),
+  ...NO_FIRE_ACTIONS.map((continuationAction) => ({
+    firstAction: STATIONARY_FIRE_ACTION, continuationAction, kind: "fire_then_move",
+  })),
+];
+
 export const MPC_HORIZON = 36;
 export const MPC_HOLD = 8;
 export const COMMIT_MOVE_FRAMES = 4;
@@ -140,7 +163,7 @@ function alignmentOf(field, game, tank) {
  */
 export function densityRollout(game, action, field, rngSeed, {
   boxes, chainState = null, horizon = MPC_HORIZON, hold = MPC_HOLD,
-  oppModel = "L2", opponentAction = null,
+  oppModel = "L2", opponentAction = null, continuationAction = null,
 } = {}) {
   const sandbox = makeSandbox(game, oppModel, rngSeed);
   const me = sandbox.tanks[0];
@@ -179,8 +202,12 @@ export function densityRollout(game, action, field, rngSeed, {
   let activeHit = false;
 
   for (let frame = 0; frame < horizon; frame++) {
+    // A fire plan releases the edge-triggered trigger on its continuation
+    // frame; a legacy direct-fire rollout releases it at `hold` instead.
     if (frame === 0) applyAction(sandbox, action);
-    else if (frame === hold) me.fire = false;
+    else if (frame === 1 && continuationAction !== null) {
+      applyAction(sandbox, continuationAction);
+    } else if (frame === hold && continuationAction === null) me.fire = false;
     const events = sandbox.step();
     for (const e of events) {
       if (e[0] === "fire" && e[1] === 0) fired = true;

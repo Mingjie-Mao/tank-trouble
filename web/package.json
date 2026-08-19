@@ -20,6 +20,8 @@
     "regression:build": "node scripts/build-regression-seeds.mjs",
     "regression:run": "node scripts/run-regression-seeds.mjs",
     "nightly:tactical": "node scripts/run-nightly-tactical.mjs",
+    "failures:attribute": "node scripts/attribute-tactical-failures.mjs",
+    "blind:paired": "node scripts/run-paired-laika-blind.mjs",
     "collect:search-teacher": "node scripts/collect-search-teacher.mjs",
     "train:search": "node scripts/train-search-model.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",

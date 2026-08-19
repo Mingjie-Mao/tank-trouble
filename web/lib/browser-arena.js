@@ -10,6 +10,7 @@ import { TwoStageSearchAgent } from "./two-stage-search-agent.js";
 import { ShadowCorrectionAgent } from "./shadow-correction-agent.js";
 import { TacticalSafetyAgent } from "./tactical-safety-agent.js";
 import { TacticalCandidateAgent } from "./tactical-candidate-agent.js";
+import { TacticalPlanAgent } from "./tactical-plan-agent.js";
 import { VisibleOpponentModel } from "./visible-opponent-model.js";
 import { SearchTeacherRecorder } from "./search-teacher-recorder.js";
 import { LearnedPriorTacticalAgent } from "./learned-prior-tactical-agent.js";
@@ -24,7 +25,8 @@ const EMPTY = Object.freeze({
 });
 
 const POLICIES = [
-  { value: "p27-js-tactical-v2", label: "Tactical（当前冠军）" },
+  { value: "p27-js-tactical-v3", label: "Tactical Smooth（当前冠军）" },
+  { value: "p27-js-tactical-v2", label: "Tactical（冻结前任）" },
   { value: "p27-js-tactical", label: "Tactical Legacy（冻结基线）" },
   { value: "killfield-js", label: "KillField JS（第三方速度基线）" },
   { value: "laika-js", label: "Laika（官方脚本）" },
@@ -117,11 +119,83 @@ function makeAgent(name, seed, opponentModel) {
   if (name === "p27-js-tactical-v2-recorder") {
     return new SearchTeacherRecorder({ seed, oppModel: opponentModel });
   }
+  // The promoted champion: frozen Tactical plus K4 wall-contact physics
+  // (enabled on the arena, not here) and K1 fire continuation.
+  if (name === "p27-js-tactical-v3") {
+    return new TacticalCandidateAgent({
+      seed,
+      oppModel: opponentModel,
+      enableShotSettlementAudit: true,
+      fireContinuation: true,
+    });
+  }
   if (name === "p27-js-tactical-v2") {
     return new TacticalCandidateAgent({
       seed,
       oppModel: opponentModel,
       enableShotSettlementAudit: true,
+    });
+  }
+  // Phase 2A commitment sweep: the champion with a shortened move commitment.
+  // Only meaningful alongside K4 wall sliding, which is set on the arena.
+  // The `-wr` suffix additionally lets a resolved wall contact break
+  // commitment, restoring the selective replan trigger K4 removed.
+  // `-wr` lets a resolved wall contact break commitment; `-fc` searches the 18
+  // fire-continuation plans and stops forcing verified shots.
+  const commitMatch = /^p27-js-tactical-v2-c(\d+)(-wr)?(-fc)?$/.exec(name);
+  if (commitMatch) {
+    return new TacticalCandidateAgent({
+      seed,
+      oppModel: opponentModel,
+      enableShotSettlementAudit: true,
+      commitMoveFrames: Number(commitMatch[1]),
+      wallContactReplan: Boolean(commitMatch[2]),
+      fireContinuation: Boolean(commitMatch[3]),
+    });
+  }
+  // Privileged variant: the rollout keeps the live rng stream and Laika's real
+  // goal stack. Not deployable and not fair play — it measures how much of the
+  // remaining gap to the exact-state teacher is missing information rather than
+  // weaker search.
+  const privMatch = /^p27-js-tactical-v2-priv(-fc)?$/.exec(name);
+  if (privMatch) {
+    return new TacticalCandidateAgent({
+      seed,
+      oppModel: "L3",
+      enableShotSettlementAudit: true,
+      fireContinuation: Boolean(privMatch[1]),
+    });
+  }
+  if (name === "p27-js-tactical-plan") {
+    return new TacticalPlanAgent({ seed, oppModel: opponentModel });
+  }
+  const safetyV2Match = /^p27-js-tactical-safety-v2(?:-h(\d+))?$/.exec(name);
+  if (safetyV2Match) {
+    return new TacticalCandidateAgent({
+      seed,
+      oppModel: opponentModel,
+      enableShotSettlementAudit: true,
+      enableLastChanceSafety: true,
+      lastChanceHorizon: Number(safetyV2Match[1] ?? 16),
+    });
+  }
+  const fireSafetyMatch = /^p27-js-tactical-fire-shield(?:-h(\d+))?$/.exec(name);
+  if (fireSafetyMatch) {
+    return new TacticalCandidateAgent({
+      seed,
+      oppModel: opponentModel,
+      enableShotSettlementAudit: true,
+      enableLastChanceSafety: true,
+      lastChanceMode: "fire",
+      lastChanceHorizon: Number(fireSafetyMatch[1] ?? 10),
+    });
+  }
+  if (name === "p27-js-tactical-anti-stall") {
+    return new TacticalCandidateAgent({
+      seed,
+      oppModel: opponentModel,
+      enableShotSettlementAudit: true,
+      enableSafeStallChase: true,
     });
   }
   const doubleDeathMatch = /^p27-js-tactical-dd-safe(?:-m(\d+))?$/.exec(name);
@@ -202,7 +276,10 @@ function label(name) {
   if (name === "dodger-js") return "Dodger JS";
   if (name === "p27-js-shield") return "JS Safety prototype（未晋级）";
   if (name === "p27-js-tactical") return "Tactical Legacy";
+  if (name === "p27-js-tactical-v3") return "Tactical Smooth";
   if (name === "p27-js-tactical-v2") return "Tactical";
+  if (name === "p27-js-tactical-plan") return "Tactical Plan（隐藏候选）";
+  if (name === "p27-js-tactical-safety-v2") return "Tactical Safety v2（隐藏候选）";
   if (name === "p27-js-consensus") return "JS Consensus Safety（候选）";
   if (name.startsWith("p27-js-two-stage")) return "JS Two-stage Search（候选）";
   const horizonMatch = /^killfield-h(\d+)-js$/.exec(name);
@@ -221,11 +298,15 @@ function percentile(values, q) {
  * this arena; Node evaluation scripts instantiate it directly.
  */
 export class BrowserArena {
-  constructor({ seed = 970000 } = {}) {
+  constructor({ seed = 970000, wallSliding = false } = {}) {
     this.mode = "watch";
-    this.leftPolicy = "p27-js-tactical-v2";
+    this.leftPolicy = "p27-js-tactical-v3";
     this.rightPolicy = "laika-js";
     this.seed = Number(seed) >>> 0;
+    // K4 wall-contact physics, applied to the whole world (both tanks and every
+    // planner rollout). Off by default so the frozen champion's published
+    // numbers keep describing the physics they were measured on.
+    this.wallSliding = Boolean(wallSliding);
     this.paused = false;
     this.humanControls = controls();
     this.streak = 0;
@@ -249,6 +330,7 @@ export class BrowserArena {
     this.game = new Game({
       seed: this.seed,
       aiFactory: nativeLaika ? (game, tank) => new LaikaAI(game, tank) : null,
+      wallSliding: this.wallSliding,
     });
     this.game.scores = oldScores;
     this._configureControllers();
@@ -342,14 +424,14 @@ export class BrowserArena {
       }
       this.mode = nextMode;
       if (nextMode === "watch") {
-        this.leftPolicy = payload.left_policy ?? "p27-js-tactical-v2";
+        this.leftPolicy = payload.left_policy ?? "p27-js-tactical-v3";
         this.rightPolicy = "laika-js";
       } else if (nextMode === "play") {
         this.leftPolicy = "human";
-        this.rightPolicy = payload.right_policy ?? "p27-js-tactical-v2";
+        this.rightPolicy = payload.right_policy ?? "p27-js-tactical-v3";
       } else {
-        this.leftPolicy = payload.left_policy ?? "p27-js-tactical-v2";
-        this.rightPolicy = payload.right_policy ?? "p27-js-tactical-v2";
+        this.leftPolicy = payload.left_policy ?? "p27-js-tactical-v3";
+        this.rightPolicy = payload.right_policy ?? "p27-js-tactical-v3";
       }
       this._configureControllers();
     } else if (action === "new_maze") {

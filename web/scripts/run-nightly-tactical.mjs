@@ -1,11 +1,9 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { performance } from "node:perf_hooks";
 
-import { BrowserArena } from "../lib/browser-arena.js";
 import {
-  DEFAULT_LEAGUE_OPPONENTS, playLeagueGame, summarizeLeague,
+  DEFAULT_LEAGUE_OPPONENTS, playLeagueGame, playWatchGame, summarizeLeague,
 } from "../lib/browser-league.js";
 import { CHAMPION_BASELINE } from "../lib/champion-baseline.js";
 import { summarizeSelfplayFlywheel } from "../lib/selfplay-flywheel.js";
@@ -27,7 +25,7 @@ const outputRoot = argument("output-root", "data/nightly");
 const runDir = path.join(outputRoot, runId);
 const candidates = argument(
   "candidates",
-  "p27-js-tactical-opponent-model,p27-js-tactical-combined",
+  "p27-js-tactical-anti-stall,p27-js-tactical-fire-shield-h10",
 ).split(",").map((value) => value.trim()).filter(Boolean);
 const roundsPerSide = Number(argument("rounds-per-side", "13"));
 const maxFrames = Number(argument("max-frames", "3000"));
@@ -92,13 +90,15 @@ async function ensureRegression(policy, regression) {
   for (const item of regression.cases) {
     if (checkpoint.regression[policy][item.key]) continue;
     checkpoint.regression[policy][item.key] = {
-      ...playLeagueGame({
-        candidate: policy,
-        opponent: item.opponent,
-        candidateSide: item.candidateSide,
-        seed: item.seed,
-        maxFrames,
-      }),
+      ...(item.mode === "watch"
+        ? playWatchGame({ candidate: policy, seed: item.seed, maxFrames })
+        : playLeagueGame({
+          candidate: policy,
+          opponent: item.opponent,
+          candidateSide: item.candidateSide,
+          seed: item.seed,
+          maxFrames,
+        })),
       baselineOutcome: item.baselineOutcome,
       tags: item.tags,
     };
@@ -116,38 +116,20 @@ async function ensureRegression(policy, regression) {
   return { games, regressions, recoveries, passed: regressions.length === 0 };
 }
 
-function playWatchGame(policy, seed) {
-  const arena = new BrowserArena({ seed });
-  arena.command({ action: "mode", mode: "watch", left_policy: policy, right_policy: "laika-js" });
-  const decisionMs = [];
-  const started = performance.now();
-  for (let frame = 0; frame < maxFrames; frame += 1) {
-    arena.step(frame * 40);
-    if (arena.lastDecisionMs[0] > 0) decisionMs.push(arena.lastDecisionMs[0]);
-    const roundEnd = arena.lastEvents.find((event) => event[0] === "round_end");
-    if (roundEnd) {
-      const outcome = roundEnd[1] === 0 ? "win"
-        : roundEnd[1] === 1 ? "loss" : "double_death";
-      return {
-        policy, seed, outcome, frames: frame + 1,
-        elapsedMs: performance.now() - started,
-        decisionP95Ms: percentile(decisionMs, 0.95),
-      };
-    }
-  }
-  return {
-    policy, seed, outcome: "draw", frames: maxFrames,
-    elapsedMs: performance.now() - started,
-    decisionP95Ms: percentile(decisionMs, 0.95),
-  };
-}
-
 async function ensureBlind(policy) {
   checkpoint.blind[policy] ??= {};
   for (let index = 0; index < blindRounds; index += 1) {
     const seed = blindSeed + index;
     if (checkpoint.blind[policy][seed]) continue;
-    checkpoint.blind[policy][seed] = playWatchGame(policy, seed);
+    const row = playWatchGame({ candidate: policy, seed, maxFrames });
+    checkpoint.blind[policy][seed] = {
+      policy,
+      seed,
+      outcome: row.outcome,
+      frames: row.frames,
+      elapsedMs: row.elapsedMs,
+      decisionP95Ms: row.candidateDecisionP95Ms,
+    };
     await saveCheckpoint();
     if ((index + 1) % 10 === 0 || index + 1 === blindRounds) {
       process.stdout.write(`\rblind ${policy} ${index + 1}/${blindRounds}   `);

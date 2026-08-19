@@ -24,7 +24,8 @@ import {
   InverseDensityFieldBuilder, DEFAULT_RAYS, DEFAULT_BOUNCES, DEFAULT_FLIGHT_FRAMES,
 } from "./field.js";
 import {
-  CANDIDATES, LIVE_ACTION_INDICES, MPC_HORIZON, MPC_HOLD,
+  CANDIDATES, LIVE_ACTION_INDICES, ROLLOUT_PLANS, STATIONARY_FIRE_ACTION,
+  MPC_HORIZON, MPC_HOLD,
   COMMIT_MOVE_FRAMES, COMMIT_TURN_FRAMES, OWN_BULLET_GUARD_HORIZON,
   NO_EFFECT_REPEAT_PENALTY, densityRollout, postKillSurvivalScores,
   actionSelfHits, maskMovingFireScores, actionIndex, argmax,
@@ -44,6 +45,10 @@ export class KillFieldAgent {
     horizon = MPC_HORIZON,
     hold = MPC_HOLD,
     oppModel = "L2",
+    continuityMargin = 0,
+    commitMoveFrames = COMMIT_MOVE_FRAMES,
+    wallContactReplan = false,
+    fireContinuation = false,
   } = {}) {
     this.rng = new Rng(seed);
     this.rayCount = rayCount;
@@ -51,6 +56,28 @@ export class KillFieldAgent {
     this.maxFlightFrames = maxFlightFrames;
     this.horizon = horizon;
     this.hold = hold;
+    // How many frames a chosen translation is held before the search runs
+    // again. Commitment is also broken early by `hitSomething`, which fires on
+    // ~22% of frames under the original collision model but only ~3% under K4
+    // wall sliding — so a world with K4 replans far less often at the same
+    // value here, and this becomes the knob that restores planning cadence.
+    this.commitMoveFrames = Number(commitMoveFrames);
+    // Restore the selective replan trigger K4 removed. Under the original
+    // collision model `hitSomething` fired on ~23% of frames and broke
+    // commitment whenever a wall altered the motion; under K4 it fires on
+    // ~3%, because most contacts now resolve as slides. `wallSliding` marks
+    // exactly those resolved contacts, so it carries the signal the planner
+    // lost — but it is denser than the original (~32%), so it is a
+    // replacement to be measured, not a like-for-like restoration.
+    this.wallContactReplan = Boolean(wallContactReplan);
+    // K1. Search 18 plans instead of 10 actions and stop forcing verified
+    // shots, so firing is scored against its own follow-up movement.
+    this.fireContinuation = Boolean(fireContinuation);
+    // Optional, safety-preserving tie-break for challengers. The frozen
+    // KillField/Tactical policies leave this at zero. When enabled, a current
+    // no-fire movement may be retained only when it is already within this
+    // many score points of the freshly searched optimum.
+    this.continuityMargin = Number(continuityMargin);
     // Which controller the lookahead sandbox assumes tank 1 is running.
     // "L2" plays out the real Laika script — only sound when the opponent
     // actually is Laika. "L1" just freezes their current buttons, which is
@@ -96,6 +123,55 @@ export class KillFieldAgent {
     this.ownBulletGuardEvents = 0;
     this.noEffectEvents = 0;
     this.planMs = [];
+    this.continuityHolds = 0;
+    this.currentFireOpportunity = false;
+    this.fireOpportunityWindows = 0;
+    this.fireOpportunityCaptures = 0;
+    this.fireOpportunityFrames = 0;
+    this.missedFireOpportunityFrames = 0;
+    this.executedCombatFrames = 0;
+    this.movementSwitches = 0;
+    this.throttleReversals = 0;
+    this.turnReversals = 0;
+    this.previousExecutedMovement = null;
+  }
+
+  observeFireOpportunity(available) {
+    const next = Boolean(available);
+    if (next && !this.currentFireOpportunity) this.fireOpportunityWindows += 1;
+    this.currentFireOpportunity = next;
+  }
+
+  observeExecutedAction(game, action) {
+    if (this.currentFireOpportunity) {
+      this.fireOpportunityFrames += 1;
+      if (action[2] === 1) {
+        this.fireOpportunityCaptures += 1;
+        // A held trigger cannot capture the same window twice.
+        this.currentFireOpportunity = false;
+      } else {
+        this.missedFireOpportunityFrames += 1;
+      }
+    }
+    if (!(game.tanks[0].alive && game.tanks[1].alive && !game.frozen)) return;
+    this.executedCombatFrames += 1;
+    const movement = [action[0], action[1]];
+    const previous = this.previousExecutedMovement;
+    if (previous !== null
+        && (movement[0] !== previous[0] || movement[1] !== previous[1])) {
+      this.movementSwitches += 1;
+    }
+    if (previous !== null
+        && ((movement[0] === 0 && previous[0] === 2)
+          || (movement[0] === 2 && previous[0] === 0))) {
+      this.throttleReversals += 1;
+    }
+    if (previous !== null
+        && ((movement[1] === 0 && previous[1] === 2)
+          || (movement[1] === 2 && previous[1] === 0))) {
+      this.turnReversals += 1;
+    }
+    this.previousExecutedMovement = movement;
   }
 
   /** Did the last command actually move us? Detects grinding against a wall. */
@@ -211,17 +287,45 @@ export class KillFieldAgent {
     const field = this.ensureField(game);
     const seed = this.rng.randrange(1 << 30);
     const values = new Float64Array(CANDIDATES.length);
-    // Only the ten selectable candidates are rolled out. The eight
-    // move-and-shoot columns get masked unconditionally, so simulating them
-    // would be 44% of the work for a value that is overwritten anyway.
-    for (const index of LIVE_ACTION_INDICES) {
-      values[index] = densityRollout(game, CANDIDATES[index], field, seed, {
-        boxes: this.boxes,
-        chainState: this.chain,
-        horizon: this.horizon,
-        hold: this.hold,
-        oppModel: this.oppModel,
-      });
+    this.bestFireContinuation = null;
+    if (this.fireContinuation) {
+      // K1. Eighteen plans collapsing onto the same ten real first actions:
+      // nine persistent no-fire controls, plus nine "fire this frame, then
+      // move" continuations that all share the stationary-fire first action.
+      values.fill(-1e9);
+      const me = game.tanks[0];
+      const canFire = me.triggerReleased && game.weaponReady(me);
+      for (const plan of ROLLOUT_PLANS) {
+        if (plan.kind === "fire_then_move" && !canFire) continue;
+        const value = densityRollout(game, plan.firstAction, field, seed, {
+          boxes: this.boxes,
+          chainState: this.chain,
+          horizon: this.horizon,
+          hold: this.hold,
+          oppModel: this.oppModel,
+          continuationAction: plan.continuationAction,
+        });
+        const index = actionIndex(plan.firstAction);
+        if (value > values[index]) {
+          values[index] = value;
+          if (plan.firstAction === STATIONARY_FIRE_ACTION) {
+            this.bestFireContinuation = plan.continuationAction;
+          }
+        }
+      }
+    } else {
+      // Only the ten selectable candidates are rolled out. The eight
+      // move-and-shoot columns get masked unconditionally, so simulating them
+      // would be 44% of the work for a value that is overwritten anyway.
+      for (const index of LIVE_ACTION_INDICES) {
+        values[index] = densityRollout(game, CANDIDATES[index], field, seed, {
+          boxes: this.boxes,
+          chainState: this.chain,
+          horizon: this.horizon,
+          hold: this.hold,
+          oppModel: this.oppModel,
+        });
+      }
     }
     maskMovingFireScores(values);
     if (this.actionNoEffect && this.observedPreviousAction !== null) {
@@ -242,7 +346,10 @@ export class KillFieldAgent {
   act(game) {
     const started = performance.now();
     this.lastDecisionKind = "none";
-    if (!game.tanks[0].alive) return [1, 1, 0];
+    if (!game.tanks[0].alive) {
+      this.observeFireOpportunity(false);
+      return [1, 1, 0];
+    }
     this.observeActionEffect(game);
     this.observedPreviousAction = this.effectAction ?? [1, 1, 0];
 
@@ -250,6 +357,7 @@ export class KillFieldAgent {
       // Post-kill: the world is still live and our own bullets can still kill
       // us, so keep making explicit no-fire survival decisions.
       if (!game.tanks[1].alive) {
+        this.observeFireOpportunity(false);
         if (this.actionNoEffect) this.commitRemaining = 0;
         if (this.commitRemaining > 0 && !game.tanks[0].hitSomething) {
           this.commitRemaining -= 1;
@@ -263,7 +371,8 @@ export class KillFieldAgent {
         const action = [picked[0], picked[1], 0];
         this.committedAction = action;
         this.commitRemaining = Math.min(1,
-          action[0] !== 1 ? COMMIT_MOVE_FRAMES : action[1] !== 1 ? COMMIT_TURN_FRAMES : 0);
+          action[0] !== 1 ? this.commitMoveFrames
+            : action[1] !== 1 ? COMMIT_TURN_FRAMES : 0);
         return this.emitAction(game, action, "post_kill_plan");
       }
 
@@ -271,21 +380,42 @@ export class KillFieldAgent {
       this.updateLiveChain(game, field);
       if (this.actionNoEffect) this.commitRemaining = 0;
 
-      if (KillFieldAgent.verifiedHit(game)) {
+      const verifiedHit = KillFieldAgent.verifiedHit(game);
+      this.observeFireOpportunity(verifiedHit);
+      // K1. A verified firing window cancels commitment so the search runs
+      // again, but no longer forces the shot: firing competes with the nine
+      // movement plans in the same score and may lose to evasion or to a
+      // better shooting position.
+      if (verifiedHit && this.fireContinuation) {
+        this.commitRemaining = 0;
+      } else if (verifiedHit) {
         this.commitRemaining = 0;
         return this.emitAction(game, [1, 1, 1], "forced_fire");
       }
 
-      if (this.commitRemaining > 0 && !game.tanks[0].hitSomething) {
+      const contactBrokeCommitment = game.tanks[0].hitSomething
+        || (this.wallContactReplan && game.tanks[0].wallSliding);
+      if (this.commitRemaining > 0 && !contactBrokeCommitment) {
         this.commitRemaining -= 1;
         return this.emitAction(game, this.committedAction, "hold");
       }
 
       const values = this.scores(game);
-      const action = CANDIDATES[argmax(values)];
+      let pickedIndex = argmax(values);
+      if (this.continuityMargin > 0 && CANDIDATES[pickedIndex][2] === 0) {
+        const previousIndex = actionIndex(this.lastMotionAction);
+        const previous = CANDIDATES[previousIndex];
+        if (previous?.[2] === 0
+            && values[previousIndex] >= values[pickedIndex] - this.continuityMargin
+            && !actionSelfHits(game, previous)) {
+          pickedIndex = previousIndex;
+          this.continuityHolds += 1;
+        }
+      }
+      const action = CANDIDATES[pickedIndex];
       if (action[2] === 0) {
         this.committedAction = action;
-        this.commitRemaining = action[0] !== 1 ? COMMIT_MOVE_FRAMES
+        this.commitRemaining = action[0] !== 1 ? this.commitMoveFrames
           : action[1] !== 1 ? COMMIT_TURN_FRAMES : 0;
       }
       return this.emitAction(game, action, "plan");
@@ -298,6 +428,7 @@ export class KillFieldAgent {
   /** Decide and write the result onto tank 0. */
   drive(game) {
     const [throttle, turn, fire] = this.act(game);
+    this.observeExecutedAction(game, [throttle, turn, fire]);
     const me = game.tanks[0];
     me.forward = throttle === 2;
     me.backup = throttle === 0;
@@ -320,6 +451,20 @@ export class KillFieldAgent {
       huntChainTotal: this.chainTotal,
       ownBulletGuardEvents: this.ownBulletGuardEvents,
       noEffectEvents: this.noEffectEvents,
+      continuityHolds: this.continuityHolds,
+      fireOpportunityWindows: this.fireOpportunityWindows,
+      fireOpportunityCaptures: this.fireOpportunityCaptures,
+      fireOpportunityCaptureRate: this.fireOpportunityCaptures
+        / Math.max(1, this.fireOpportunityWindows),
+      fireOpportunityFrames: this.fireOpportunityFrames,
+      missedFireOpportunityFrames: this.missedFireOpportunityFrames,
+      movementSwitches: this.movementSwitches,
+      movementSwitchesPer1000: 1000 * this.movementSwitches
+        / Math.max(1, this.executedCombatFrames),
+      throttleReversals: this.throttleReversals,
+      turnReversals: this.turnReversals,
+      reversalsPer1000: 1000 * (this.throttleReversals + this.turnReversals)
+        / Math.max(1, this.executedCombatFrames),
       planMedianMs: at(0.5),
       planP95Ms: at(0.95),
     };

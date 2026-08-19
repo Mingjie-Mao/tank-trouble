@@ -401,7 +401,7 @@ export function Arena() {
   const [runtime, setRuntime] = useState<RuntimeKind>("browser");
   const [connected, setConnected] = useState(false);
   const [mode, setMode] = useState<Mode>("watch");
-  const [leftPolicy, setLeftPolicy] = useState("p27-js-tactical-v2");
+  const [leftPolicy, setLeftPolicy] = useState("p27-js-tactical-v3");
   const [rightPolicy, setRightPolicy] = useState("laika-js");
   const [seed, setSeed] = useState("970000");
   const [muted, setMuted] = useState(true);

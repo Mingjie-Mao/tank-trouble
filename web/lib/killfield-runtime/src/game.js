@@ -44,6 +44,9 @@ export class Tank {
     this.alive = true;
     this.currentWeapon = C.STARTWEAPON;
     this.hitSomething = false;
+    // True on any frame a blocked substep was resolved as a slide rather than
+    // a stop. Only ever set when the owning Game has wallSliding enabled.
+    this.wallSliding = false;
 
     // Input vector, written either by the keyboard or by a controller.
     this.forward = false;
@@ -164,14 +167,106 @@ export class Tank {
         && py >= Math.min(...ys) && py <= Math.max(...ys);
   }
 
+  /**
+   * K4. Move the hull the shortest small distance that clears every wall probe.
+   *
+   * Tank motion is substepped, but rotation happens around the centre. Close to
+   * a wall that can put one corner a fraction of a pixel inside the wall;
+   * rejecting the entire turn makes the controls feel locked. Axis-aligned
+   * walls only need four normal and four corner directions here. Failed
+   * searches restore the exact starting pose.
+   */
+  separateFromWall(maxDistance = C.TANK_WALL_SEPARATION_BASE
+      * (this.game.scale / 50.0)) {
+    if (!this.anySideHit()) return true;
+    const startX = this.x;
+    const startY = this.y;
+    const diagonal = Math.SQRT1_2;
+    const directions = [
+      [1, 0], [-1, 0], [0, 1], [0, -1],
+      [diagonal, diagonal], [diagonal, -diagonal],
+      [-diagonal, diagonal], [-diagonal, -diagonal],
+    ];
+    for (let ring = 1; ring <= C.TANK_WALL_SEPARATION_STEPS; ring++) {
+      const distance = maxDistance * ring / C.TANK_WALL_SEPARATION_STEPS;
+      for (const [nx, ny] of directions) {
+        this.x = startX + nx * distance;
+        this.y = startY + ny * distance;
+        if (!this.anySideHit()) return true;
+      }
+    }
+    this.x = startX;
+    this.y = startY;
+    return false;
+  }
+
+  /** K4. Gently turn the hull toward the closest direction parallel to the wall. */
+  alignToWallTangent(tangentAxis) {
+    const tangentHeading = tangentAxis === 1 ? 90.0 : 0.0;
+    const oppositeHeading = normRot(tangentHeading + 180.0);
+    const firstDelta = normRot(tangentHeading - this.rotation);
+    const secondDelta = normRot(oppositeHeading - this.rotation);
+    const delta = Math.abs(firstDelta) <= Math.abs(secondDelta) ? firstDelta : secondDelta;
+    const maxTurn = C.TANK_WALL_ALIGN_SPEED;
+    const turn = Math.max(-maxTurn, Math.min(maxTurn, delta));
+    if (Math.abs(turn) < 1e-9) return;
+
+    const oldRotation = this.rotation;
+    this.rotation = normRot(this.rotation + turn);
+    if (this.anySideHit()) this.rotation = oldRotation;
+  }
+
+  /**
+   * K4. Resolve a blocked movement substep by removing the inward normal and
+   * retaining the wall tangent with angle-dependent friction. The five movement
+   * substeps make the maximum contact-position error about 0.8 px at reference
+   * scale, while avoiding expensive sweeps inside every MPC rollout.
+   * Returns 1 for a horizontal tangent, 2 for a vertical tangent, and 0 when
+   * the contact is a stop.
+   */
+  resolveWallContact(dx, dy) {
+    const startX = this.x;
+    const startY = this.y;
+    const epsilon = Math.max(1e-9, this.game.scale * 1e-9);
+
+    this.x = startX + dx;
+    const xBlocked = Math.abs(dx) > epsilon && this.anySideHit();
+    this.x = startX;
+
+    this.y = startY + dy;
+    const yBlocked = Math.abs(dy) > epsilon && this.anySideHit();
+    this.y = startY;
+
+    // Both blocked is a real corner. Neither blocked means only their combined
+    // diagonal hit an oriented corner. Both cases stop: choosing an arbitrary
+    // axis is the sideways pop this resolver deliberately avoids.
+    if (xBlocked === yBlocked) return 0;
+
+    let tangentX = xBlocked ? 0.0 : dx;
+    let tangentY = yBlocked ? 0.0 : dy;
+    const normalMagnitude = Math.abs(xBlocked ? dx : dy);
+    const remainingMagnitude = Math.hypot(dx, dy);
+    if (Math.hypot(tangentX, tangentY) <= epsilon || remainingMagnitude <= epsilon) {
+      return 0;
+    }
+
+    const incidence = normalMagnitude / remainingMagnitude;
+    const rawRetention = 1.0 - C.TANK_WALL_SLIDE_INCIDENCE_DRAG * incidence;
+    const retention = Math.max(C.TANK_WALL_SLIDE_MIN_RETENTION,
+      Math.min(C.TANK_WALL_SLIDE_MAX_RETENTION, rawRetention));
+    tangentX *= retention;
+    tangentY *= retention;
+
+    this.x += tangentX;
+    this.y += tangentY;
+    const slid = Math.hypot(tangentX, tangentY) > epsilon;
+    return slid ? (xBlocked ? 2 : 1) : 0;
+  }
+
   update() {
     const g = this.game;
     if (g.frozen) return;
     if (!this.alive) return;
-
-    const oldX = this.x;
-    const oldY = this.y;
-    const oldRot = this.rotation;
 
     // The AI writes this tank's input vector before any motion happens.
     if (this.ai !== null) {
@@ -180,6 +275,22 @@ export class Tank {
       }
       this.ai.setInputToDoActions();
     }
+
+    // K4. Recover shallow numerical/contact overlap as soon as the tank asks to
+    // move. Without this, every candidate pose starts out invalid and even a
+    // command pointing away from the wall can be rejected forever. Must run
+    // before the reference pose is taken, or the rollback undoes it.
+    if (g.wallSliding
+        && (this.forward || this.backup || this.turnLeft || this.turnRight)
+        && this.anySideHit()) {
+      this.separateFromWall();
+    }
+
+    // The AI cannot move the tank, so taking the reference pose here rather
+    // than before the controller leaves the non-K4 path unchanged.
+    const oldX = this.x;
+    const oldY = this.y;
+    const oldRot = this.rotation;
 
     const STEPS = C.TANK_MOVE_STEPS;
     let moveSize = 0.0;
@@ -190,6 +301,8 @@ export class Tank {
     if (this.turnRight) turnSize += this.turnSpeed / STEPS;
 
     this.hitSomething = false;
+    this.wallSliding = false;
+    let wallTangentAxis = 0;
 
     // Optimistic pass: walk all five substeps ignoring walls.
     for (let i = 0; i < STEPS; i++) {
@@ -206,26 +319,71 @@ export class Tank {
       this.x = oldX;
       this.y = oldY;
       this.rotation = oldRot;
-      for (let i = 0; i < STEPS; i++) {
-        const stepOldRot = this.rotation;
-        this.rotation = normRot(this.rotation + turnSize);
-        if (this.anySideHit()) {
-          this.rotation = stepOldRot;
-          this.hitSomething = true;
+      if (g.wallSliding) {
+        // K4. A blocked diagonal substep keeps its unobstructed axis with
+        // contact friction, turning a shallow scrape into a slide, and a turn
+        // that only grazes a wall is recovered instead of being rolled back.
+        for (let i = 0; i < STEPS; i++) {
+          const stepOldX = this.x;
+          const stepOldY = this.y;
+          const stepOldRot = this.rotation;
+          this.rotation = normRot(this.rotation + turnSize);
+          if (this.anySideHit()) {
+            if (this.separateFromWall()) {
+              this.wallSliding = true;
+            } else {
+              this.x = stepOldX;
+              this.y = stepOldY;
+              this.rotation = stepOldRot;
+              this.hitSomething = true;
+            }
+          }
+          const moveOldX = this.x;
+          const moveOldY = this.y;
+          const rad = (this.rotation - 90) * DEG;
+          const dx = Math.cos(rad) * moveSize;
+          const dy = Math.sin(rad) * moveSize;
+          this.x += dx;
+          this.y += dy;
+          const leadingPoints = moveSize > 0 ? this.hitPointsFront
+            : moveSize < 0 ? this.hitPointsRear : null;
+          if (leadingPoints !== null && this.hitCheck(leadingPoints)) {
+            this.x = moveOldX;
+            this.y = moveOldY;
+            const tangentAxis = this.resolveWallContact(dx, dy);
+            if (tangentAxis !== 0) {
+              this.wallSliding = true;
+              wallTangentAxis = tangentAxis;
+            } else {
+              this.hitSomething = true;
+            }
+          }
         }
-        const stepOldX = this.x;
-        const stepOldY = this.y;
-        const rad = (this.rotation - 90) * DEG;
-        this.x += Math.cos(rad) * moveSize;
-        this.y += Math.sin(rad) * moveSize;
-        if (moveSize > 0 && this.hitCheck(this.hitPointsFront)) {
-          this.x = stepOldX;
-          this.y = stepOldY;
-          this.hitSomething = true;
-        } else if (moveSize < 0 && this.hitCheck(this.hitPointsRear)) {
-          this.x = stepOldX;
-          this.y = stepOldY;
-          this.hitSomething = true;
+        // Contact torque is a per-frame effect. Applying it once here avoids
+        // both substep-count-dependent turning and repeated collision probes.
+        if (wallTangentAxis !== 0) this.alignToWallTangent(wallTangentAxis);
+      } else {
+        for (let i = 0; i < STEPS; i++) {
+          const stepOldRot = this.rotation;
+          this.rotation = normRot(this.rotation + turnSize);
+          if (this.anySideHit()) {
+            this.rotation = stepOldRot;
+            this.hitSomething = true;
+          }
+          const stepOldX = this.x;
+          const stepOldY = this.y;
+          const rad = (this.rotation - 90) * DEG;
+          this.x += Math.cos(rad) * moveSize;
+          this.y += Math.sin(rad) * moveSize;
+          if (moveSize > 0 && this.hitCheck(this.hitPointsFront)) {
+            this.x = stepOldX;
+            this.y = stepOldY;
+            this.hitSomething = true;
+          } else if (moveSize < 0 && this.hitCheck(this.hitPointsRear)) {
+            this.x = stepOldX;
+            this.y = stepOldY;
+            this.hitSomething = true;
+          }
         }
       }
     }
@@ -348,11 +506,16 @@ export class Game {
    *                                        return an object exposing the three
    *                                        decision hooks, or null for no AI
    */
-  constructor({ seed = null, tanks = 2, aiFactory = null } = {}) {
+  constructor({ seed = null, tanks = 2, aiFactory = null, wallSliding = false } = {}) {
     this.rng = new Rng(seed);
     this.seed = this.rng.seed;
     this.tanksCount = tanks;
     this.aiFactory = aiFactory;
+    // K4 wall-contact physics. Off by default: it deviates from the decompiled
+    // Flash original, which cancels a blocked substep outright, so every
+    // historical baseline and `test_original_port.py` stay valid at false.
+    // makeSandbox() propagates it, keeping the planner's world model in sync.
+    this.wallSliding = wallSliding;
 
     this.settingsMaxBullets = C.SETTINGS_MAX_BULLETS;
 
