@@ -180,8 +180,9 @@ export function playLeagueGame({
 }
 
 /** Official Laika protocol: the engine owns Laika and the candidate sees L2. */
-export function playWatchGame({ candidate, seed, maxFrames = 3000 }) {
-  const arena = new BrowserArena({ seed });
+export function playWatchGame({ candidate, seed, maxFrames = 3000,
+  wallSliding = false }) {
+  const arena = new BrowserArena({ seed, wallSliding });
   arena.command({
     action: "mode",
     mode: "watch",

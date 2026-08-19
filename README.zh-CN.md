@@ -185,6 +185,12 @@ python3 training/watch.py --policy model
 python3 test_original_port.py
 ```
 
+运行 Python 测试套件（用 `unittest`，不依赖 pytest）：
+
+```bash
+python3 -m unittest discover -s training -p "test_*.py" -t .
+```
+
 本地启动浏览器产品：
 
 ```bash

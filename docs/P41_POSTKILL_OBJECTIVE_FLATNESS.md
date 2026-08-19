@@ -2,8 +2,13 @@
 
 > 状态：**已于 2026-08-13 修复，未回退状态机。**
 > 修法见文末「修复实施」一节；下面的诊断全部保留，因为根因分析仍然成立。
-> 守卫测试：`test_killfield_teacher.py::test_post_kill_objective_is_not_flat`
-> 与 `::test_post_kill_window_keeps_the_tank_moving`。
+> 守卫测试（本仓库测试用 `unittest`，不依赖 pytest）：
+>
+> ```bash
+> python3 -m unittest training.test_killfield_teacher.KillFieldTeacherTests.test_post_kill_objective_is_not_flat training.test_killfield_teacher.KillFieldTeacherTests.test_post_kill_window_keeps_the_tank_moving
+> ```
+>
+> 全部 Python 测试：`python3 -m unittest discover -s training -p "test_*.py" -t .`
 
 ## 背景：为什么动这块
 

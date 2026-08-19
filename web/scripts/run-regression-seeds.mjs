@@ -12,18 +12,23 @@ const candidate = argument("candidate", "p27-js-tactical-v2");
 const seedsPath = argument("seeds", "data/regression/tactical-champion.json");
 const output = argument("output", "data/regression/latest.json");
 const maxFrames = Number(argument("max-frames", "3000"));
+// K4 wall-contact physics is a property of the world. A candidate that runs it
+// in production must be replayed against the regression set under the same
+// physics, or the replay measures a policy in a world it never sees.
+const wallSliding = process.argv.includes("--wall-sliding");
 const artifact = JSON.parse(await readFile(seedsPath, "utf8"));
 
 const games = [];
 for (const item of artifact.cases) {
   const row = item.mode === "watch"
-    ? playWatchGame({ candidate, seed: item.seed, maxFrames })
+    ? playWatchGame({ candidate, seed: item.seed, maxFrames, wallSliding })
     : playLeagueGame({
       candidate,
       opponent: item.opponent,
       candidateSide: item.candidateSide,
       seed: item.seed,
       maxFrames,
+      wallSliding,
     });
   games.push({
     ...row,
@@ -46,6 +51,7 @@ const report = {
   schemaVersion: 1,
   generatedAt: new Date().toISOString(),
   candidate,
+  wallSliding,
   frozenChampion: artifact.champion,
   seeds: seedsPath,
   games,

@@ -202,6 +202,12 @@ Verify the port against the decompiled original:
 python3 test_original_port.py
 ```
 
+Run the Python test suite (`unittest`; pytest is not a dependency):
+
+```bash
+python3 -m unittest discover -s training -p "test_*.py" -t .
+```
+
 Run the browser product locally:
 
 ```bash
