@@ -24,6 +24,21 @@ const EMPTY = Object.freeze({
   fire: false,
 });
 
+// Policies that run the K4 wall-contact physics. Physics is a property of the
+// world rather than of an agent, so it cannot live in makeAgent; deriving it
+// from the policies in play keeps every entry point correct without each one
+// having to remember a flag. Two omissions of exactly that kind have already
+// cost real measurements: mirrorView dropped the flag from its passthrough
+// list, and playWatchGame did not accept it at all.
+const WALL_SLIDING_POLICIES = new Set(["p27-js-tactical-v3"]);
+
+export function policyUsesWallSliding(name) {
+  if (typeof name !== "string") return false;
+  return WALL_SLIDING_POLICIES.has(name)
+    || /^p27-js-tactical-v3-/.test(name)
+    || /-fc$/.test(name);
+}
+
 const POLICIES = [
   { value: "p27-js-tactical-v3", label: "Tactical Smooth（当前冠军）" },
   { value: "p27-js-tactical-v2", label: "Tactical（冻结前任）" },
@@ -323,15 +338,18 @@ function percentile(values, q) {
  * this arena; Node evaluation scripts instantiate it directly.
  */
 export class BrowserArena {
-  constructor({ seed = 970000, wallSliding = false } = {}) {
+  constructor({ seed = 970000, wallSliding = null } = {}) {
     this.mode = "watch";
     this.leftPolicy = "p27-js-tactical-v3";
     this.rightPolicy = "laika-js";
     this.seed = Number(seed) >>> 0;
     // K4 wall-contact physics, applied to the whole world (both tanks and every
-    // planner rollout). Off by default so the frozen champion's published
-    // numbers keep describing the physics they were measured on.
-    this.wallSliding = Boolean(wallSliding);
+    // planner rollout). `null` derives it from the policies in play, so a
+    // frozen policy keeps the physics its published numbers describe and the
+    // promoted champion gets its own. Pass a boolean to force either way.
+    this.wallSlidingOverride = wallSliding === null || wallSliding === undefined
+      ? null : Boolean(wallSliding);
+    this.wallSliding = this.wallSlidingOverride ?? false;
     this.paused = false;
     this.humanControls = controls();
     this.streak = 0;
@@ -352,6 +370,10 @@ export class BrowserArena {
     const oldScores = keepScores && this.game ? this.game.scores.slice() : [0, 0];
     this.seed = Number(seed) >>> 0;
     const nativeLaika = this.mode === "watch";
+    this.wallSliding = this.wallSlidingOverride ?? (
+      policyUsesWallSliding(this.leftPolicy) || policyUsesWallSliding(this.rightPolicy)
+    );
+    this.game = null;
     this.game = new Game({
       seed: this.seed,
       aiFactory: nativeLaika ? (game, tank) => new LaikaAI(game, tank) : null,
@@ -361,7 +383,20 @@ export class BrowserArena {
     this._configureControllers();
   }
 
+  /** Physics follows whichever policies are currently in play. */
+  _resolveWallSliding() {
+    const derived = this.wallSlidingOverride ?? (
+      policyUsesWallSliding(this.leftPolicy) || policyUsesWallSliding(this.rightPolicy)
+    );
+    this.wallSliding = derived;
+    // Applied to the live game too: switching policies must switch the world,
+    // otherwise a frozen policy keeps running under the champion's physics.
+    if (this.game) this.game.wallSliding = derived;
+    return derived;
+  }
+
   _configureControllers() {
+    this._resolveWallSliding();
     const nativeLaika = this.mode === "watch";
     this.game.aiFactory = nativeLaika
       ? (game, tank) => new LaikaAI(game, tank)

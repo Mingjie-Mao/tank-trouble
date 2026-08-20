@@ -27,10 +27,7 @@ test("worker-owned arena preserves direct BrowserArena trajectory", () => {
   const emitted = [];
   const runtime = new BrowserArenaWorkerRuntime({ emit: (message) => emitted.push(message) });
   runtime.handle({ type: "init", seed: 1010042, autostart: false });
-  // The deployed worker enables K4 wall-contact physics, so the reference
-  // arena must be built the same way; this test asserts the worker does not
-  // change behaviour, not that it uses library defaults.
-  const direct = new BrowserArena({ seed: 1010042, wallSliding: true });
+  const direct = new BrowserArena({ seed: 1010042 });
 
   const command = {
     action: "mode",

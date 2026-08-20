@@ -57,3 +57,30 @@ test("browser runtime exposes fair scripted league opponents", () => {
     assert.equal(arena.state().right_policy, rightPolicy);
   }
 });
+
+test("physics follows the policies in play, not the entry point", () => {
+  // Wall-contact physics is a world property, so it cannot be set in makeAgent
+  // and every caller would otherwise have to remember a flag. Two omissions of
+  // that kind already cost real measurements (mirrorView's passthrough list,
+  // and playWatchGame's signature), so the arena derives it instead.
+  const champion = new BrowserArena({ seed: 970000 });
+  assert.equal(champion.game.wallSliding, true);
+
+  // Selecting the frozen predecessor must restore the collision model its
+  // published numbers describe, including on an already-running arena.
+  champion.command({
+    action: "mode", mode: "watch", left_policy: "p27-js-tactical-v2",
+  });
+  assert.equal(champion.wallSliding, false);
+  assert.equal(champion.game.wallSliding, false);
+
+  champion.command({
+    action: "mode", mode: "watch", left_policy: "p27-js-tactical-v3",
+  });
+  assert.equal(champion.game.wallSliding, true);
+
+  // An explicit boolean still wins, so experiments can force either model.
+  const forced = new BrowserArena({ seed: 970000, wallSliding: false });
+  forced.command({ action: "mode", mode: "watch", left_policy: "p27-js-tactical-v3" });
+  assert.equal(forced.game.wallSliding, false);
+});
