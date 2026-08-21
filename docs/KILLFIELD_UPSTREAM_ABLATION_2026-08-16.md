@@ -693,7 +693,9 @@ systematic rather than noise.
 
 **Rejected, and the default is unchanged.** The trade is bad in this project's
 terms: the problem is confined to the selfplay demonstration mode, p95 already
-passes the promotion gate, and the cost lands on double-KOs — precisely the
+passes the promotion gate **as measured under Node — see the measurement caveat
+at the end of this document, which may invalidate that clause** — and the cost
+lands on double-KOs — precisely the
 metric where this repository's settlement layers are its advantage over
 upstream (K4 costs the bare upstream agent +69% double-KOs and costs Tactical
 0%). Spending that advantage to improve a non-blocking performance figure is
@@ -766,3 +768,36 @@ scripted one.
 | Latency tail | Understood and attributed; pruning rejected as a bad trade |
 | Opponent modelling | Bounded and rejected — no measurable room in the current wiring |
 | Remaining gap to the oracle | ~3pp, and it is information the agent may not have |
+
+## Measurement caveat — every latency figure here is Node, not a browser
+
+All p50/p95/p99 numbers in this document were measured by running the arena
+under Node. The 40 ms budget they are compared against is a *browser* frame
+budget, and the two environments were never cross-checked.
+
+One observation says the gap may be large. The deployed page, still serving the
+previous champion at the time of writing, reports a decision p95 of **55.7 ms**
+in its own telemetry. The same policy measured under Node in watch mode is
+**12.57 ms** — roughly 4x apart.
+
+This is a single uncontrolled observation, not a calibration: the deployed
+arena runs inside a Web Worker, its telemetry window and mode may differ from
+the harness used here, and the machine is doing other work. It is recorded
+because of what it would mean if the ratio holds, not because the ratio is
+established.
+
+If it does hold, the champion's 20.05 ms isolated Node p95 would correspond to
+something near 80 ms in the browser, above the frame budget. Two conclusions in
+this document rest on Node latency and would need revisiting:
+
+- **The promotion gate.** p95 was judged to pass at 24.93 ms (selfplay, Node).
+- **Phase 6.** Root-breadth pruning was rejected partly because "p95 already
+  passes the gate", so the double-KO cost was not worth paying. If the gate is
+  not actually passed in the browser, that trade needs re-deciding — the pruning
+  cut p99 by 40% at no measurable win-rate cost.
+
+**Next step, once the promoted champion is deployed:** read the page's own p95
+for the champion and for the frozen predecessor, on the same machine and mode,
+and calibrate the Node figures against them. Until then, treat every latency
+number in this document as an internal comparison between candidates — which is
+what it is valid for — and not as evidence about the frame budget.

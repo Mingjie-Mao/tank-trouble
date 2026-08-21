@@ -45,6 +45,12 @@ established what each one actually contributes — see
 | P27b | 1330/1500 = 88.7% | 8.6 ms | Historical pure-network baseline |
 | Exact-state shielded MPC | 297/300 = 99.0% | seconds | Privileged offline teacher, not deployable |
 
+All decision-cost figures above are measured under Node, isolated. The 40 ms
+frame budget they are compared against is a browser budget, and the two have not
+been cross-calibrated; the deployed page's own telemetry has reported a
+noticeably higher p95 for the previous champion. Treat these as comparisons
+between candidates rather than as browser measurements.
+
 The KillField rows describe the **vendored 2026-08-12 snapshot** on this
 repository's seeds. Upstream has since moved on and reports 897/1000 = 89.7% for
 its current agent; that figure was independently reproduced here, exactly, as
