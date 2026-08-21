@@ -780,15 +780,33 @@ previous champion at the time of writing, reports a decision p95 of **55.7 ms**
 in its own telemetry. The same policy measured under Node in watch mode is
 **12.57 ms** — roughly 4x apart.
 
-This is a single uncontrolled observation, not a calibration: the deployed
-arena runs inside a Web Worker, its telemetry window and mode may differ from
-the harness used here, and the machine is doing other work. It is recorded
-because of what it would mean if the ratio holds, not because the ratio is
-established.
+Three candidate explanations were ruled out by re-measuring rather than by
+argument:
 
-If it does hold, the champion's 20.05 ms isolated Node p95 would correspond to
-something near 80 ms in the browser, above the frame budget. Two conclusions in
-this document rest on Node latency and would need revisiting:
+- **Metric.** The page times `agent.drive(game)` and nothing else. That is the
+  same quantity this harness records.
+- **Window.** The page reports p95 over a rolling 600-frame window, roughly 24
+  seconds, while this harness pooled every frame of a run. Recomputing the Node
+  data with the page's own window barely moves it: the *maximum* rolling-window
+  p95 over 25 rounds is 19.5 ms, against a pooled 10.71 ms.
+- **Mode.** The page was in watch mode, where the sandbox rebuilds Laika's full
+  script (`L2`) rather than freezing its buttons (`L1`). Measured in watch mode
+  specifically; the figures above are already that.
+
+| `p27-js-tactical-v2`, watch | p95 |
+|---|---:|
+| Node, pooled over all frames | 10.71 ms |
+| Node, worst rolling 600-frame window | 19.5 ms |
+| **Deployed page, same policy and window** | **52.8 ms** |
+
+So the gap is environmental, not an artefact of how the two numbers are
+computed — roughly **2.7x even against the worst Node window**. What remains
+uncontrolled is the host: the deployed arena runs in a Web Worker alongside
+canvas rendering, and that machine's load is unknown.
+
+Applying that ratio to the champion's 20.05 ms isolated Node p95 puts it above
+the 40 ms frame budget in a browser. Two conclusions in this document rest on
+Node latency and would need revisiting:
 
 - **The promotion gate.** p95 was judged to pass at 24.93 ms (selfplay, Node).
 - **Phase 6.** Root-breadth pruning was rejected partly because "p95 already
