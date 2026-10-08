@@ -7,9 +7,9 @@
  * it to choose the action that is sent to the live game.
  */
 
-import { Bullet, Game, Tank } from "./killfield-runtime/src/game.js";
-import { LaikaAI } from "./killfield-runtime/src/laika.js";
-import { Rng } from "./killfield-runtime/src/rng.js";
+import { Bullet, Game, Tank } from "./engine/game.js";
+import { LaikaAI } from "./engine/laika.js";
+import { Rng } from "./engine/rng.js";
 
 function cloneTank(tank, sandbox) {
   const copy = Object.create(Tank.prototype);

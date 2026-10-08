@@ -8,7 +8,7 @@
  * kill decision.
  */
 
-import * as C from "../constants.js";
+import * as C from "../../../engine/constants.js";
 
 const RISK_HORIZON = 30;
 const HIT_RADIUS_SCALE = 0.25; // cells; approximates the tank's effective size

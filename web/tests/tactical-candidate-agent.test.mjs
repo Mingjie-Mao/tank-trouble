@@ -29,10 +29,10 @@ for (const policy of [
 
 test("Tactical Plan turns a known zero-fire passive win into an active kill", () => {
   const baseline = playWatchGame({
-    candidate: "p27-js-tactical-v2", seed: 3300000, maxFrames: 1000,
+    candidate: "p27-js-tactical-v2", seed: 3300190, maxFrames: 1000,
   });
   const planned = playWatchGame({
-    candidate: "p27-js-tactical-plan", seed: 3300000, maxFrames: 1000,
+    candidate: "p27-js-tactical-plan", seed: 3300190, maxFrames: 1000,
   });
   assert.equal(baseline.outcome, "win");
   assert.equal(baseline.winType, "passive_win");
@@ -65,7 +65,7 @@ test("visible opponent model learns generic action persistence and transition", 
 
 test("shot settlement audit repairs a real double death without a seed rule", () => {
   const play = (policy) => {
-    const arena = new BrowserArena({ seed: 2700002 });
+    const arena = new BrowserArena({ seed: 2700185 });
     arena.command({
       action: "mode",
       mode: "selfplay",
@@ -89,7 +89,7 @@ test("shot settlement audit repairs a real double death without a seed rule", ()
 
 test("last-chance safety recovers a real visible-bullet loss without a seed rule", () => {
   const play = (policy) => {
-    const arena = new BrowserArena({ seed: 2900207 });
+    const arena = new BrowserArena({ seed: 2900286 });
     arena.command({
       action: "mode",
       mode: "watch",

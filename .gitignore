@@ -86,3 +86,13 @@ web/data/regression/*.json
 # streams are per-run and can be regenerated.
 training/analysis/**/*.json
 training/analysis/**/*.jsonl
+
+# Local editor/agent configuration. Machine-specific and regenerated on demand;
+# it is not part of the product.
+.claude/
+
+# League PPO checkpoints and logs (training/js_league_ppo.py). Per-run output.
+training/runs/
+
+# TypeScript incremental build state.
+web/tsconfig.tsbuildinfo

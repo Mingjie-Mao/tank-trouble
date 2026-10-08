@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { Game } from "../lib/killfield-runtime/src/game.js";
-import { LaikaAI } from "../lib/killfield-runtime/src/laika.js";
+import { Game } from "../lib/engine/game.js";
+import { LaikaAI } from "../lib/engine/laika.js";
 import { KillFieldAgent } from "../lib/killfield-runtime/src/killfield/teacher.js";
 import { ShadowCorrectionAgent } from "../lib/shadow-correction-agent.js";
 

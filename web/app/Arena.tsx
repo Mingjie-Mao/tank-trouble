@@ -276,6 +276,9 @@ const OPPONENT_LABELS: Record<string, string> = {
 const ENGLISH_POLICY_LABELS: Record<string, string> = {
   "p27-js-tactical-v2": "Tactical (current champion)",
   "p27-js-tactical": "Tactical Legacy (frozen baseline)",
+  "p27-js-tactical-v3-prior-k6": "Tactical Smooth + learned prior K6",
+  "p27-js-tactical-v3-prior-k4": "Tactical Smooth + learned prior K4",
+  "ppo-league": "League PPO (experimental, pure network self-play)",
   "killfield-js": "KillField JS (third-party speed baseline)",
   "laika-js": "Laika (official script)",
   "hunter-js": "Hunter JS (strong pursuit)",
@@ -652,6 +655,11 @@ export function Arena() {
     if (state?.frozen) return zh ? "本回合结算中" : "Settling this round";
     if (mode === "play") return zh ? "WASD / 方向键移动 · Q / 空格开火" : "WASD / arrow keys to move · Q / Space to fire";
     if (mode === "selfplay") return zh ? "双方 AI 正在实时自博弈" : "Both AIs are playing live";
+    if (runtime === "browser" && state?.left_policy === "ppo-league") {
+      return zh
+        ? "纯网络：联赛自博弈 PPO，每帧一次前向（约 1 ms），不做任何搜索"
+        : "Pure network: league self-play PPO, one forward pass per frame (~1 ms), no search";
+    }
     if (runtime === "browser") {
       return zh
         ? "纯浏览器模式：H36 搜索 + 按需两段式安全验证，无 Python 往返"

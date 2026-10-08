@@ -1,4 +1,4 @@
-import * as C from "./killfield-runtime/src/constants.js";
+import * as C from "./engine/constants.js";
 import { KillFieldAgent } from "./killfield-runtime/src/killfield/teacher.js";
 import {
   CANDIDATES, LIVE_ACTION_INDICES,
@@ -80,7 +80,7 @@ function betterVisible(left, right) {
 }
 
 function visibleBulletTwoStagePlan(game, horizon, splitFrames,
-  rootBreadth = NO_FIRE_INDICES.length) {
+  rootBreadth = NO_FIRE_INDICES.length, deadline = null, stats = null) {
   let best = null;
   const survivors = [];
   for (const rootIndex of NO_FIRE_INDICES) {
@@ -101,7 +101,24 @@ function visibleBulletTwoStagePlan(game, horizon, splitFrames,
   // expanded. At the default breadth every survivor is expanded, so the
   // frozen behaviour is unchanged.
   survivors.sort((left, right) => right.advanced.minClearance - left.advanced.minClearance);
-  for (const { root, advanced } of survivors.slice(0, Math.max(1, rootBreadth))) {
+  const expandable = survivors.slice(0, Math.max(1, rootBreadth));
+  let expanded = 0;
+  for (const { root, advanced } of expandable) {
+    // Budget-triggered narrowing. An unconditional breadth cut pays a
+    // double-KO cost on every frame to help the ~1% that overrun (measured:
+    // breadth 9/5/3 -> double-KO 9/13/15 at unchanged win rate). Checking the
+    // clock instead keeps full breadth whenever the frame can afford it and
+    // degrades only once this frame is already late. The first root is always
+    // expanded, so a plan is still returned under any budget.
+    if (deadline !== null && expanded > 0 && performance.now() >= deadline) {
+      if (stats !== null) {
+        stats.narrowed = true;
+        stats.rootsExpanded = expanded;
+        stats.rootsDropped = expandable.length - expanded;
+      }
+      break;
+    }
+    expanded += 1;
     for (const continuationIndex of NO_FIRE_INDICES) {
       const continuation = CANDIDATES[continuationIndex];
       const result = continueVisibleBulletRollout(
@@ -234,6 +251,17 @@ export class TacticalSafetyAgent extends KillFieldAgent {
     // default expands all of them, which is the frozen behaviour; lowering it
     // trades a little search breadth for a much shorter latency tail.
     this.evasionRootBreadth = Number(options.evasionRootBreadth ?? NO_FIRE_INDICES.length);
+    // Wall-clock budget in milliseconds for the whole decision, measured from
+    // the innermost act(). Once it is spent, the evasion search stops opening
+    // new roots instead of running the full 9x9. `null` (the default) disables
+    // the check, which is the deterministic path: any clock-dependent cut makes
+    // a run irreproducible, so every paired seed evaluation must leave this off
+    // and only the deployed page turns it on. Zero is a real budget — already
+    // spent before the audit begins — not a disable.
+    this.evasionBudgetMs = options.evasionBudgetMs === undefined
+      || options.evasionBudgetMs === null
+      ? null
+      : Number(options.evasionBudgetMs);
     this.persistEvasionPlan = Boolean(options.persistEvasionPlan ?? false);
     this.tacticalAudits = 0;
     this.tacticalOverrides = 0;
@@ -245,6 +273,8 @@ export class TacticalSafetyAgent extends KillFieldAgent {
     this.evasionPlanStarts = 0;
     this.evasionPlanFrames = 0;
     this.evasionPlanReplans = 0;
+    this.evasionBudgetNarrowed = 0;
+    this.evasionRootsDropped = 0;
   }
 
   emitVerifiedAction(game, action, kind) {
@@ -322,9 +352,21 @@ export class TacticalSafetyAgent extends KillFieldAgent {
       return baseline;
     }
 
+    // The deadline is anchored to the start of this frame's whole decision, not
+    // to the start of this audit, so the search sees the time the main rollout
+    // already spent.
+    const deadline = this.evasionBudgetMs !== null && this.decisionStartedAt !== null
+      ? this.decisionStartedAt + this.evasionBudgetMs
+      : null;
+    const narrowing = { narrowed: false, rootsExpanded: 0, rootsDropped: 0 };
     const twoStage = visibleBulletTwoStagePlan(
       game, this.safetyHorizon, this.evasionSplit, this.evasionRootBreadth,
+      deadline, narrowing,
     );
+    if (narrowing.narrowed) {
+      this.evasionBudgetNarrowed += 1;
+      this.evasionRootsDropped += narrowing.rootsDropped;
+    }
     this.auditMs.push(performance.now() - started);
     if (!twoStage?.survived
         || (!this.persistEvasionPlan && sameAction(twoStage.root, baseline))) return baseline;
@@ -367,6 +409,11 @@ export class TacticalSafetyAgent extends KillFieldAgent {
       evasionPlanStarts: this.evasionPlanStarts,
       evasionPlanFrames: this.evasionPlanFrames,
       evasionPlanReplans: this.evasionPlanReplans,
+      evasionBudgetMs: this.evasionBudgetMs,
+      evasionBudgetNarrowed: this.evasionBudgetNarrowed,
+      evasionBudgetNarrowedRate: this.evasionBudgetNarrowed
+        / Math.max(1, this.tacticalAudits),
+      evasionRootsDropped: this.evasionRootsDropped,
       tacticalP95Ms: p95,
     };
   }

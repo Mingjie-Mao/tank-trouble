@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { makeExactSandbox } from "../lib/exact-sandbox.js";
-import { Game } from "../lib/killfield-runtime/src/game.js";
-import { LaikaAI } from "../lib/killfield-runtime/src/laika.js";
+import { Game } from "../lib/engine/game.js";
+import { LaikaAI } from "../lib/engine/laika.js";
 import { applyAction } from "../lib/killfield-runtime/src/killfield/sandbox.js";
 
 function frameAction(frame) {

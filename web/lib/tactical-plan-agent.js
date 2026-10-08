@@ -1,4 +1,4 @@
-import * as C from "./killfield-runtime/src/constants.js";
+import * as C from "./engine/constants.js";
 import {
   applyAction, makeSandbox,
 } from "./killfield-runtime/src/killfield/sandbox.js";

@@ -1,4 +1,4 @@
-import { getShortestPathWithDistances } from "./killfield-runtime/src/maze.js";
+import { getShortestPathWithDistances } from "./engine/maze.js";
 import { CANDIDATES } from "./killfield-runtime/src/killfield/score.js";
 import { applyAction, makeSandbox } from "./killfield-runtime/src/killfield/sandbox.js";
 import { TacticalSafetyAgent } from "./tactical-safety-agent.js";

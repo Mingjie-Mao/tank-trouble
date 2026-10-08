@@ -13,7 +13,7 @@
  * authority.
  */
 
-import * as C from "../constants.js";
+import * as C from "../../../engine/constants.js";
 
 export const DEFAULT_RAYS = 2048;
 export const DEFAULT_BOUNCES = 2;

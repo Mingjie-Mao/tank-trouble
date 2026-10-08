@@ -12,6 +12,7 @@
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "test": "npm run build && node --test tests/*.test.mjs",
     "benchmark:runtime": "node scripts/benchmark-browser-runtime.mjs",
+    "calibrate:latency": "node scripts/calibrate-latency.mjs",
     "evaluate:runtime": "node scripts/evaluate-browser-runtime.mjs",
     "collect:shadow": "node scripts/collect-shadow-corrections.mjs",
     "compare:runtime": "node scripts/compare-browser-runtime.mjs",

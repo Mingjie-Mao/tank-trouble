@@ -16,9 +16,9 @@
  *   L1  freezes whatever buttons the opponent is currently holding.
  */
 
-import { Game, Tank, Bullet } from "../game.js";
-import { LaikaAI } from "../laika.js";
-import { Rng } from "../rng.js";
+import { Game, Tank, Bullet } from "../../../engine/game.js";
+import { LaikaAI } from "../../../engine/laika.js";
+import { Rng } from "../../../engine/rng.js";
 
 function copyTank(tank, sandbox, visibleIndex) {
   const copy = Object.create(Tank.prototype);

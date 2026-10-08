@@ -1,7 +1,7 @@
-import { Game } from "./killfield-runtime/src/game.js";
-import { LaikaAI } from "./killfield-runtime/src/laika.js";
-import { Rng } from "./killfield-runtime/src/rng.js";
-import { BULLET_VISUAL_RADIUS, FPS } from "./killfield-runtime/src/constants.js";
+import { Game } from "./engine/game.js";
+import { LaikaAI } from "./engine/laika.js";
+import { Rng } from "./engine/rng.js";
+import { BULLET_VISUAL_RADIUS, FPS } from "./engine/constants.js";
 import { KillFieldAgent } from "./killfield-runtime/src/killfield/teacher.js";
 import { mirrorView } from "./killfield-runtime/src/killfield/mirror.js";
 import { SaferSearchAgent } from "./safer-search-agent.js";
@@ -15,6 +15,8 @@ import { VisibleOpponentModel } from "./visible-opponent-model.js";
 import { SearchTeacherRecorder } from "./search-teacher-recorder.js";
 import { LearnedPriorTacticalAgent } from "./learned-prior-tactical-agent.js";
 import { DodgerJsAgent, LaikaJsAgent } from "./scripted-opponents.js";
+import { PpoLeagueAgent } from "../rl/ppo-agent.js";
+import { PpoDeepShieldAgent, PpoPriorTacticalAgent } from "../rl/ppo-hybrid.js";
 
 const EMPTY = Object.freeze({
   forward: false,
@@ -30,19 +32,21 @@ const EMPTY = Object.freeze({
 // having to remember a flag. Two omissions of exactly that kind have already
 // cost real measurements: mirrorView dropped the flag from its passthrough
 // list, and playWatchGame did not accept it at all.
-const WALL_SLIDING_POLICIES = new Set(["p27-js-tactical-v3"]);
 
-export function policyUsesWallSliding(name) {
-  if (typeof name !== "string") return false;
-  return WALL_SLIDING_POLICIES.has(name)
-    || /^p27-js-tactical-v3-/.test(name)
-    || /-fc$/.test(name);
+export function policyUsesWallSliding() {
+  // The engine (lib/engine/) implements the original collision model only.
+  // Policies once promoted under wall-contact physics now run under it too.
+  return false;
 }
 
 const POLICIES = [
   { value: "p27-js-tactical-v3", label: "Tactical Smooth（当前冠军）" },
+  { value: "p27-js-tactical-v3-b12", label: "Tactical Smooth + 12ms 预算收窄" },
+  { value: "p27-js-tactical-v3-prior-k6", label: "Tactical Smooth + 学习先验 K6" },
+  { value: "p27-js-tactical-v3-prior-k4", label: "Tactical Smooth + 学习先验 K4" },
   { value: "p27-js-tactical-v2", label: "Tactical（冻结前任）" },
   { value: "p27-js-tactical", label: "Tactical Legacy（冻结基线）" },
+  { value: "ppo-league", label: "League PPO（实验 · 纯网络联赛自博弈）" },
   { value: "killfield-js", label: "KillField JS（第三方速度基线）" },
   { value: "laika-js", label: "Laika（官方脚本）" },
   { value: "hunter-js", label: "Hunter JS（强追击）" },
@@ -130,7 +134,7 @@ class IdleJsAgent {
   }
 }
 
-function makeAgent(name, seed, opponentModel) {
+export function makeAgent(name, seed, opponentModel) {
   if (name === "p27-js-tactical-v2-recorder") {
     return new SearchTeacherRecorder({ seed, oppModel: opponentModel });
   }
@@ -142,6 +146,22 @@ function makeAgent(name, seed, opponentModel) {
       oppModel: opponentModel,
       enableShotSettlementAudit: true,
       fireContinuation: true,
+    });
+  }
+  // The champion with budget-triggered narrowing on the evasion search. The
+  // browser calibration showed the champion runs at a 75.3 ms rolling p95
+  // against a 40 ms budget, so the gate it was promoted under does not hold
+  // there. Unlike a fixed breadth cut this keeps the full 9x9 search whenever
+  // the frame can afford it. The budget is wall-clock, so this policy is
+  // deliberately non-deterministic and must not be used for paired seed
+  // evaluation — see BROWSER_LATENCY_CALIBRATION_2026-08-28.md.
+  if (/^p27-js-tactical-v3-b\d+$/.test(name)) {
+    return new TacticalCandidateAgent({
+      seed,
+      oppModel: opponentModel,
+      enableShotSettlementAudit: true,
+      fireContinuation: true,
+      evasionBudgetMs: Number(name.slice(name.lastIndexOf("-b") + 2)),
     });
   }
   // Phase 3 of the adoption plan: the champion plus the visible-state opponent
@@ -262,11 +282,16 @@ function makeAgent(name, seed, opponentModel) {
       opponentBehavior: new VisibleOpponentModel(),
     });
   }
-  const learnedPriorMatch = /^p27-js-tactical-prior-k(\d+)$/.exec(name);
+  // The champion with the learned action prior narrowing the plan list. Same
+  // options as `p27-js-tactical-v3` so the only difference under test is the
+  // pruning; the `-v3-` prefix also gives it the champion's wall physics.
+  const learnedPriorMatch = /^p27-js-tactical-v3-prior-k(\d+)$/.exec(name);
   if (learnedPriorMatch) {
     return new LearnedPriorTacticalAgent({
       seed,
       oppModel: opponentModel,
+      enableShotSettlementAudit: true,
+      fireContinuation: true,
       priorTopK: Number(learnedPriorMatch[1]),
     });
   }
@@ -300,6 +325,29 @@ function makeAgent(name, seed, opponentModel) {
   }
   if (name === "killfield-js") {
     return new KillFieldAgent({ seed, oppModel: opponentModel });
+  }
+  // League PPO (training/js_league_ppo.py): a pure network, no search. It was
+  // trained under the original collision model, which policyUsesWallSliding()
+  // leaves in place for it.
+  if (name === "ppo-league") return new PpoLeagueAgent({ seed });
+  // Search hybrids over the same network (rl/ppo-hybrid.js). Experimental and
+  // not in the UI list; graded with rl/eval-agent.mjs.
+  const ppoPriorMatch = /^ppo-tactical-k(\d+)$/.exec(name);
+  if (ppoPriorMatch) {
+    return new PpoPriorTacticalAgent({
+      seed,
+      oppModel: opponentModel,
+      enableShotSettlementAudit: true,
+      priorTopK: Number(ppoPriorMatch[1]),
+    });
+  }
+  const deepShieldMatch = /^ppo-deep-shield(?:-h(\d+))?(?:-v(\d+))?$/.exec(name);
+  if (deepShieldMatch) {
+    return new PpoDeepShieldAgent({
+      seed,
+      horizon: Number(deepShieldMatch[1] ?? 24),
+      vetoWithin: deepShieldMatch[2] === undefined ? null : Number(deepShieldMatch[2]),
+    });
   }
   if (name === "laika-js") return new LaikaJsAgent();
   if (name === "hunter-js") return new LaikaJsAgent({ profile: "hunter" });

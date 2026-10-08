@@ -1,5 +1,5 @@
-import * as C from "./killfield-runtime/src/constants.js";
-import { LaikaAI } from "./killfield-runtime/src/laika.js";
+import * as C from "./engine/constants.js";
+import { LaikaAI } from "./engine/laika.js";
 
 function clearInputs(tank) {
   tank.forward = false;

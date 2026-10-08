@@ -8,8 +8,8 @@
  * approach looked.
  */
 
-import * as C from "../constants.js";
-import { LaikaAI } from "../laika.js";
+import * as C from "../../../engine/constants.js";
+import { LaikaAI } from "../../../engine/laika.js";
 import { makeSandbox, applyAction } from "./sandbox.js";
 import { HuntChainState } from "./chain.js";
 import { incomingRisk } from "./risk.js";

@@ -17,8 +17,8 @@
  * The agent always drives tank 0.
  */
 
-import * as C from "../constants.js";
-import { LaikaAI } from "../laika.js";
+import * as C from "../../../engine/constants.js";
+import { LaikaAI } from "../../../engine/laika.js";
 import { HuntChainState } from "./chain.js";
 import {
   InverseDensityFieldBuilder, DEFAULT_RAYS, DEFAULT_BOUNCES, DEFAULT_FLIGHT_FRAMES,
@@ -30,7 +30,7 @@ import {
   NO_EFFECT_REPEAT_PENALTY, densityRollout, postKillSurvivalScores,
   actionSelfHits, maskMovingFireScores, actionIndex, argmax,
 } from "./score.js";
-import { Rng } from "../rng.js";
+import { Rng } from "../../../engine/rng.js";
 
 function cellOf(game, tank) {
   return [Math.floor(tank.x / game.scale), Math.floor(tank.y / game.scale)];
@@ -91,6 +91,7 @@ export class KillFieldAgent {
   reset() {
     this.game = null;
     this.roundNumber = null;
+    this.decisionStartedAt = null;
     this.builder = null;
     this.fieldCache = new Map();
     this.field = null;
@@ -345,6 +346,10 @@ export class KillFieldAgent {
    */
   act(game) {
     const started = performance.now();
+    // Origin for any deadline-aware work further out in the subclass chain.
+    // This is the innermost act(), so it runs first in wall-clock terms and its
+    // start is the start of the whole frame's decision.
+    this.decisionStartedAt = started;
     this.lastDecisionKind = "none";
     if (!game.tanks[0].alive) {
       this.observeFireOpportunity(false);
