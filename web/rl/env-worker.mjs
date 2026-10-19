@@ -4,7 +4,7 @@
  * in lockstep by `training/js_league_ppo.py`.
  *
  * Requests (little-endian), each starting with a u8 command:
- *   1 INIT    u32 length + JSON {envs, seed, weights, wallSliding}  -> STEP reply
+ *   1 INIT    u32 length + JSON {envs, seed, weights, doubleDeathReward?}  -> STEP reply
  *   2 STEP    u8[E] learner actions, u8[E] frozen-opponent actions  -> STEP reply
  *   3 WEIGHTS u32 length + JSON {weights}                           -> u8 ack
  *   4 CLOSE
@@ -85,12 +85,12 @@ function replyLayout(n) {
 }
 
 class Batch {
-  constructor({ envs, seed, weights, wallSliding = false }) {
+  constructor({ envs, seed, weights, doubleDeathReward }) {
     this.n = envs;
     this.rng = new Rng(seed >>> 0);
     this.nextSeed = seed >>> 0;
     this.weights = weights;
-    this.wallSliding = wallSliding;
+    this.doubleDeathReward = doubleDeathReward;
     this.episodes = new Array(envs);
     this.slots = new Int16Array(envs);
     this.obs = new Float32Array(OBS_DIM);
@@ -115,7 +115,9 @@ class Batch {
       : slot === 1 ? OpponentKind.TACTICAL : OpponentKind.FROZEN;
     // Consecutive seeds from this worker's own range: every episode a new maze.
     this.nextSeed = (this.nextSeed + 1) >>> 0;
-    this.episodes[i] = new DuelEpisode(this.nextSeed, kind, { wallSliding: this.wallSliding });
+    this.episodes[i] = new DuelEpisode(this.nextSeed, kind, {
+      doubleDeathReward: this.doubleDeathReward,
+    });
     this.slots[i] = slot;
   }
 

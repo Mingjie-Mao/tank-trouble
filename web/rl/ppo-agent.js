@@ -1,12 +1,11 @@
 /**
  * The league-PPO policy (`training/js_league_ppo.py`) as a browser agent.
  *
- * Each frame it encodes the same 1028-value observation the policy was
- * trained on (`duel-env.js`), runs the network in plain JS and samples an
- * action. Sampling, not argmax: the greedy policy stalls into 30 s draws
- * (45.3% vs 56.5% true wins over the same 400 Laika seeds).
+ * Each frame it encodes the same observation the policy was trained on
+ * (`duel-env.js`), runs the network in plain JS and samples an action.
+ * Sampling, not argmax: the greedy policy stalls into 30 s draws.
  *
- * The weights are ~1.7 MB, so they are fetched with a dynamic import the
+ * The weights are ~2 MB, so they are fetched with a dynamic import the
  * first time the policy is chosen and cached for every round after; until
  * they arrive the tank holds still.
  */
@@ -15,7 +14,7 @@ import { Rng } from "../lib/engine/rng.js";
 import { CANDIDATES } from "../lib/killfield-runtime/src/killfield/score.js";
 import {
   AIM_SELF_OFFSET, BULLET_DIM, BULLET_OFFSET, BULLET_SLOTS, DODGE_OFFSET, MAP_DIM, OBS_DIM,
-  OBS_SCHEMA, SeatHistory, encodeObservation, inflatedBoxes,
+  OBS_SCHEMA, PREVIOUS_OBS_SCHEMA, SeatHistory, encodeObservation, inflatedBoxes,
 } from "./duel-env.js";
 
 const BULLET_END = BULLET_OFFSET + BULLET_SLOTS * BULLET_DIM;
@@ -45,7 +44,9 @@ const relu = (v) => { for (let i = 0; i < v.length; i++) if (v[i] < 0) v[i] = 0;
 
 export class PpoNetwork {
   constructor(meta, tensors) {
-    if (meta.schema !== OBS_SCHEMA) {
+    // A schema-24 model has two fewer scalar inputs; the first-strike pair
+    // was appended last, so it simply never reads them.
+    if (meta.schema !== OBS_SCHEMA && meta.schema !== PREVIOUS_OBS_SCHEMA) {
       throw new Error(`PPO model schema ${meta.schema} != observation schema ${OBS_SCHEMA}`);
     }
     this.meta = meta;
@@ -110,8 +111,8 @@ export class PpoNetwork {
  * dropped (if none survives, only the longest-lasting movement is kept); and
  * fire is dropped while the current barrel's shot is forecast to hit the
  * shooter. Same rule as `shielded_action(shield="move+fire")` in
- * training/js_league_ppo.py, measured at +8.4 pp true wins vs Laika over 1000
- * paired seeds (77.5% -> 85.9%, McNemar p < 1e-7).
+ * training/js_league_ppo.py; worth +3.4 pp true wins vs Laika for r6
+ * (91.50% -> 94.85% over 2000 seeds).
  *
  * Returns true when the policy's most likely action was removed.
  */
@@ -150,6 +151,11 @@ export async function loadPpoNetwork() {
     return cached;
   });
   return loading;
+}
+
+/** The loaded network, or null while it is still loading. */
+export function loadedPpoNetwork() {
+  return cached;
 }
 
 function poses(game) {
@@ -200,6 +206,8 @@ export class PpoLeagueAgent {
     for (let i = 0; i < probs.length; i++) probs[i] /= total;
     this.lastOverridden = this.shield && shieldProbabilities(probs, this.obs);
     if (this.lastOverridden) this.overrides += 1;
+    // The distribution actually sampled from, kept for the arena's AI view.
+    this.lastProbs = probs;
     return probs;
   }
 

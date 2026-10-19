@@ -1,10 +1,13 @@
 /**
  * The simulation, translated from `tank_trouble_original/game.py`.
  *
- * Fixed 25 FPS; one `step()` is one Flash enterFrame dispatch: the root
- * round logic, then tanks in creation order, then bullets in creation order,
- * with a bullet fired this frame not moving until the next one. The Python
- * port is the reference: `web/tests/engine-parity.test.mjs` replays recorded
+ * Fixed 25 FPS; one `step()` is one AVM1 frame. AVM1 runs clips from a global
+ * execution list to which every new clip is prepended, so the most recently
+ * created runs first: bullets (newest first), then tank 1 (Laika decides
+ * inside its own update), then tank 0, and last the root timeline's round
+ * logic. Bullets therefore move and hit-test before either tank moves, and a
+ * bullet fired this frame first moves on the next. The Python port is the
+ * reference: `web/tests/engine-parity.test.mjs` replays recorded
  * Python trajectories through this file and requires them to match.
  */
 
@@ -248,13 +251,11 @@ export class Bullet {
     this.lifetime = C.BULLETLIFETIME;
     this.deadly = C.BULLETDEADLY;
     this.removed = false;
-    this.justCreated = false;
-    // The muzzle point lies inside the shooter's own hit shape. The shooter
-    // is exempt until the bullet has been outside that shape once; a
-    // ricochet almost always leaves before it returns, so this only spares
-    // a tank driving straight after its own shot.
-    this.hasExitedOwner = false;
-    // Not a rule, a fact: whether this bullet has come off a wall yet.
+    // There is no exemption for the shooter. The muzzle point lies inside the
+    // barrel, but bullets run before tanks: next frame the bullet flies 4.5 px
+    // before its hit test and has left the barrel; a shot fired into a wall
+    // point-blank bounces back into its shooter and kills it, as in the original.
+    // Whether it has bounced is a fact for observers, not a rule.
     this.hasBounced = false;
   }
 
@@ -290,12 +291,8 @@ export class Bullet {
     // One hit test per frame, after the substeps (bullet :90-104). No break:
     // a bullet can hit two tanks on the same frame.
     if (this.deadly === 0) {
-      if (!this.hasExitedOwner && !this.owner.pointInShape(this.x, this.y)) {
-        this.hasExitedOwner = true;
-      }
       for (let i = 0; i < g.tanksCount; i++) {
         const tank = g.tanks[i];
-        if (tank === this.owner && !this.hasExitedOwner) continue;
         if (tank.alive && tank.pointInShape(this.x, this.y)) {
           g.registerHit(this.owner, tank);
           this.owner.bulletsFired -= 1;
@@ -447,7 +444,6 @@ export class Game {
     if (tank.currentWeapon !== "bullet") return;
     this.bulletDepth += 1;
     const b = new Bullet(this, `bullet${this.bulletDepth}`, tank, this.scale);
-    b.justCreated = true; // Flash: an attached clip's first enterFrame is next frame
     this.bullets.push(b);
     tank.bulletsFired += 1;
     this.events.push(["fire", tank.number]);
@@ -485,13 +481,25 @@ export class Game {
     this.bullets = [];
   }
 
-  /** Advance one frame (1/25 s) and return this frame's events. */
+  /** Advance one frame (1/25 s), in AVM1 execution order, and return its events. */
   step() {
     this.frame += 1;
     this.events = [];
     const rng = this.rng;
 
-    // root onEnterFrame (frame_53:2366-2536)
+    // Bullets, newest first. Ones fired this frame are created during the
+    // tank phase below, so they first move next frame.
+    for (let i = this.bullets.length - 1; i >= 0; i--) {
+      const b = this.bullets[i];
+      if (!b.removed) b.update();
+    }
+    this.bullets = this.bullets.filter((b) => !b.removed);
+
+    // Tanks, most recently created first: tank 1, then tank 0.
+    for (let i = this.tanks.length - 1; i >= 0; i--) this.tanks[i].update();
+
+    // The root timeline's onEnterFrame (frame_53:2366-2536) runs last: it is
+    // the oldest clip on the list.
     for (let i = 0; i < this.tanksCount; i++) {
       this.tankFields[i] = {
         x: Math.floor(this.tanks[i].x / this.scale),
@@ -505,8 +513,6 @@ export class Game {
     }
     if (this.shake >= 0) this.shake -= 0.5;
 
-    // Round state machine. It runs before the tanks move, and setupBattle()
-    // may fire mid-frame: the new tanks then update later this same frame.
     if (this.aliveCount <= 1) {
       if (this.endCount >= 0) this.endCount -= 1;
       if (this.endCount === C.NUMBEROFFRAMESFROZEN) {
@@ -522,19 +528,9 @@ export class Game {
     if (this.resetCount === 0) {
       this.endCount = C.NUMBEROFFRAMESBEFOREEND + C.NUMBEROFFRAMESFROZEN;
       this.frozen = false;
+      // New tanks join the list behind this frame's pass: they first run next frame.
       this.setupBattle();
     }
-
-    for (const tank of this.tanks) tank.update();
-
-    for (const b of this.bullets.slice()) {
-      if (b.justCreated) {
-        b.justCreated = false;
-        continue;
-      }
-      if (!b.removed) b.update();
-    }
-    this.bullets = this.bullets.filter((b) => !b.removed);
     return this.events;
   }
 }

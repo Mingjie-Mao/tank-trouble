@@ -3,12 +3,7 @@ import app from "./vinext-index.js";
 const STATIC_PREFIXES = ["/_next/static/"];
 const STATIC_FILES = new Set([
   "/favicon.svg",
-  "/file.svg",
-  "/globe.svg",
-  "/window.svg",
   "/og.png",
-  "/league-tactical-latest.json",
-  "/league-killfield-latest.json",
 ]);
 
 function isStaticAsset(pathname) {

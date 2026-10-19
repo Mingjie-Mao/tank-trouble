@@ -2,75 +2,26 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { BrowserArena } from "../lib/browser-arena.js";
-import { playWatchGame } from "../lib/browser-league.js";
-import { VisibleOpponentModel } from "../lib/visible-opponent-model.js";
-
-for (const policy of [
-  "p27-js-tactical-dd-safe",
-  "p27-js-tactical-opponent-model",
-  "p27-js-tactical-combined",
-  "p27-js-tactical-safety-v2",
-  "p27-js-tactical-fire-shield-h10",
-  "p27-js-tactical-anti-stall",
-  "p27-js-tactical-plan",
-]) {
-  test(`${policy} runs as a hidden evaluation candidate`, () => {
-    const arena = new BrowserArena({ seed: 2500042 });
-    arena.command({
-      action: "mode",
-      mode: "selfplay",
-      left_policy: policy,
-      right_policy: "laika-js",
-    });
-    for (let frame = 0; frame < 25; frame += 1) arena.step(frame * 40);
-    assert.equal(arena.state().left_policy, policy);
-  });
-}
-
-test("Tactical Plan turns a known zero-fire passive win into an active kill", () => {
-  const baseline = playWatchGame({
-    candidate: "p27-js-tactical-v2", seed: 3300190, maxFrames: 1000,
-  });
-  const planned = playWatchGame({
-    candidate: "p27-js-tactical-plan", seed: 3300190, maxFrames: 1000,
-  });
-  assert.equal(baseline.outcome, "win");
-  assert.equal(baseline.winType, "passive_win");
-  assert.equal(baseline.zeroFireWin, true);
-  assert.equal(planned.outcome, "win");
-  assert.equal(planned.winType, "active_win");
-  assert.ok(planned.candidateFires > 0);
-});
-
-test("visible opponent model learns generic action persistence and transition", () => {
-  const model = new VisibleOpponentModel({ minimumTransitions: 1 });
-  const enemy = {
-    backup: false, forward: true, turnLeft: false, turnRight: false, fire: false,
-  };
-  const game = { roundNumber: 1, frame: 1, tanks: [{}, enemy] };
-  model.observe(game);
-  game.frame = 4;
-  model.observe(game);
-  enemy.forward = false;
-  enemy.turnLeft = true;
-  game.frame = 5;
-  model.observe(game);
-  enemy.forward = true;
-  enemy.turnLeft = false;
-  game.frame = 7;
-  model.observe(game);
-  assert.equal(model.telemetry().visibleOpponentModelReady, true);
-  assert.deepEqual(model.predict(5), [1, 0, 0]);
-});
+import { TacticalCandidateAgent } from "../lib/tactical-candidate-agent.js";
 
 test("shot settlement audit repairs a real double death without a seed rule", () => {
-  const play = (policy) => {
-    const arena = new BrowserArena({ seed: 2700185 });
+  // Tactical v2 as the arena builds it (selfplay, L1 opponent model), with the
+  // audit's per-round allowance either at its default or at zero. The round
+  // ends before the arena would rebuild the agent.
+  const play = (maximumUnsafeAuditsPerRound) => {
+    const seed = 2700185;
+    const arena = new BrowserArena({ seed });
     arena.command({
       action: "mode",
       mode: "selfplay",
-      left_policy: policy,
+      left_policy: "p27-js-tactical-v2",
       right_policy: "dodger-js",
+    });
+    arena.leftAgent = new TacticalCandidateAgent({
+      seed: seed + 101,
+      oppModel: "L1",
+      enableShotSettlementAudit: true,
+      maximumUnsafeAuditsPerRound,
     });
     for (let frame = 0; frame < 3000; frame += 1) {
       arena.step(frame * 40);
@@ -80,32 +31,9 @@ test("shot settlement audit repairs a real double death without a seed rule", ()
     throw new Error("round did not finish");
   };
 
-  assert.deepEqual(play("p27-js-tactical-dd-safe-m0").roundEnd, ["round_end", null]);
-  const repaired = play("p27-js-tactical-dd-safe");
+  assert.deepEqual(play(0).roundEnd, ["round_end", null]);
+  const repaired = play(4);
   assert.deepEqual(repaired.roundEnd, ["round_end", 0]);
   assert.ok(repaired.telemetry.unsafeShotsSuppressed >= 1);
   assert.ok(repaired.telemetry.shotAuditP95Ms < 15);
-});
-
-test("last-chance safety recovers a real visible-bullet loss without a seed rule", () => {
-  const play = (policy) => {
-    const arena = new BrowserArena({ seed: 2900286 });
-    arena.command({
-      action: "mode",
-      mode: "watch",
-      left_policy: policy,
-      right_policy: "laika-js",
-    });
-    for (let frame = 0; frame < 3000; frame += 1) {
-      arena.step(frame * 40);
-      const roundEnd = arena.lastEvents.find((event) => event[0] === "round_end");
-      if (roundEnd) return { roundEnd, telemetry: arena.leftAgent.telemetry() };
-    }
-    throw new Error("round did not finish");
-  };
-  assert.deepEqual(play("p27-js-tactical-v2").roundEnd, ["round_end", 1]);
-  const repaired = play("p27-js-tactical-safety-v2");
-  assert.deepEqual(repaired.roundEnd, ["round_end", 0]);
-  assert.ok(repaired.telemetry.lastChanceOverrides >= 1);
-  assert.ok(repaired.telemetry.lastChanceAuditP95Ms < 15);
 });

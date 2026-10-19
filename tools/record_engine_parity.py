@@ -7,7 +7,7 @@ scripted input stream both languages reproduce exactly. Per frame it writes:
 
 * a SHA-1 over every discrete part of the state — round and settlement
   counters, scores, crate timer, each tank's alive flag, ammo, trigger, wall
-  contact and buttons, each bullet's name, owner, lifetime and owner-exit
+  contact and buttons, each bullet's name, owner, lifetime and bounce
   flag, and every event — which the JS engine must match exactly;
 * every continuous part — tank poses, bullet positions and velocities —
   rounded to 1e-6, which the JS engine must match within 1e-6.
@@ -79,7 +79,7 @@ def snapshot(g, events):
         floats += [t.x, t.y, t.rotation]
     for bl in g.bullets:
         parts.append("B" + ",".join([bl.name, str(bl.owner.number), str(bl.lifetime),
-                                     b(bl.has_exited_owner)]))
+                                     b(bl.has_bounced)]))
         floats += [bl.x, bl.y, bl.x_speed, bl.y_speed]
     for e in events:
         parts.append("E" + ",".join("null" if v is None else str(v) for v in e))

@@ -1,32 +1,37 @@
-"""League PPO on the JS engine, after KillField's Hybrid.
+"""League PPO on the JS engine.
 
 The environment is `web/rl/duel-env.js`: this repository's own physics and
 Laika, one round per episode, paid once by the round's true result (a kill
 followed by death to a bullet already in flight is a double death). Node
 workers own the environments; this process owns the networks and talks to
-them over pipes in lockstep.
+them over pipes.
 
-Recipe, taken from Hybrid (`cichlider.github.io/killfield/paper`) unless noted:
-
-* observation: schema 24, 1028 values, including the nine-move `dodge_safety`
-  lookahead that Hybrid's matched ablation found worth +9.5 pp vs Laika;
+* observation: schema 25, 1030 visible facts, including the nine-move
+  `dodge_safety` lookahead and a first-strike pair (frames each side must turn
+  before it holds a hit);
 * action: Discrete(18) = 3 throttle x 3 turn x fire, every engine frame;
 * reward: terminal only. Win +1 inside 10 s decaying to +0.5 at 30 s, double
   death -0.1, loss and 30 s draw -1, plus up to +0.25 for changing action no
   more often than Laika does;
-* opponents: 10% Laika / 10% Tactical (our search champion, standing in for
-  Hybrid's 512-ray planner) / 80% frozen ancestors. Until the first ancestor
-  exists the frozen share goes to Laika;
-* PPO: 256 envs x 128 steps, 4 epochs x 8 minibatches, gamma 0.999, lambda
-  0.95, clip 0.2, lr 3e-4 and entropy 0.01 both decaying linearly to zero
-  over the *lineage* horizon (a resume continues the schedule, it does not
-  restart it), value-only critic warm-up for the first 20 updates.
+* opponents: 10% Laika / 10% Tactical (the search agent) / 80% frozen
+  ancestors. Until the first ancestor exists the frozen share goes to Laika;
+* PPO: 288 envs x 128 steps, 4 epochs x 8 minibatches, gamma 0.999, lambda
+  0.95, clip 0.2, lr and entropy decaying linearly to zero over the *lineage*
+  horizon (a resume continues the schedule, it does not restart it), and a
+  value-only critic warm-up;
+* distil: one supervised step of expert iteration toward PPO-MPC labels from
+  `web/rl/teacher-labels.mjs`.
 
 Usage:
-    python3 -u training/js_league_ppo.py train --run r1 --total-steps 30000000
-    python3 -u training/js_league_ppo.py train --run r1 --resume
-    python3 -u training/js_league_ppo.py eval training/runs/js_league/r1/latest.pt \
-        --opponent laika --games 1000 --seed 970000
+    python3 -u training/js_league_ppo.py train --run r3 --total-steps 30000000
+    python3 -u training/js_league_ppo.py train --run r3 --resume
+    python3 -u training/js_league_ppo.py train --run r6 --total-steps 20000000 --lr 0.0001 \
+        --entropy-coef 0.003 --init-from training/runs/js_league/r3/latest.pt
+    python3 -u training/js_league_ppo.py eval training/runs/js_league/r6/latest.pt \
+        --games 1000 --seed 970000 --shield move+fire
+    python3 training/js_league_ppo.py export training/runs/js_league/r6/latest.pt
+    python3 -u training/js_league_ppo.py distil training/runs/js_league/r6/latest.pt \
+        --data training/runs/js_league/distill/labels_r1 --run distill/b16 --beta 16
 """
 
 from __future__ import annotations
@@ -54,15 +59,19 @@ ROOT = Path(__file__).resolve().parent.parent
 WORKER = ROOT / "web" / "rl" / "env-worker.mjs"
 RUNS = ROOT / "training" / "runs" / "js_league"
 
-# Layout of web/rl/duel-env.js, schema "tt-duel-24".
-OBS_SCHEMA = "tt-duel-24"
-OBS_DIM = 1028
+# Layout of web/rl/duel-env.js, schema "tt-duel-25".
+OBS_SCHEMA = "tt-duel-25"
+OBS_DIM = 1030
 MAP_W, MAP_H, MAP_C = 12, 10, 7
 MAP_DIM = MAP_W * MAP_H * MAP_C
 REST = OBS_DIM - MAP_DIM
 BULLET_OFFSET = 900  # within the full observation
 BULLET_SLOTS, BULLET_DIM = 10, 10
 ACTIONS = 18
+# Schema 25 appended these two values to schema 24; they are the last two
+# inputs of the scalar branch.
+PREVIOUS_SCHEMA = "tt-duel-24"
+FIRST_STRIKE_DIM = 2
 OUTCOMES = ("running", "win", "loss", "double", "draw")
 SLOT_NAMES = ("laika", "tactical")
 
@@ -80,7 +89,8 @@ class WorkerPool:
     core or a slow opponent search never holds the others back.
     """
 
-    def __init__(self, workers: int, envs_per_worker: int, seed: int, weights, wall_sliding=False):
+    def __init__(self, workers: int, envs_per_worker: int, seed: int, weights,
+                 double_death_reward=None):
         self.n_workers = workers
         self.e = envs_per_worker
         self.n = workers * envs_per_worker
@@ -103,7 +113,8 @@ class WorkerPool:
         for w, proc in enumerate(self.procs):
             self._send_json(proc, 1, {
                 "envs": e, "seed": seed + w * WORKER_SEED_STRIDE,
-                "weights": list(weights), "wallSliding": wall_sliding,
+                "weights": list(weights),
+                **({} if double_death_reward is None else {"doubleDeathReward": double_death_reward}),
             })
         self.last = self._gather()
 
@@ -193,10 +204,10 @@ class WorkerPool:
 # -------------------------------------------------------------------- model
 
 class ActorCritic(nn.Module):
-    """Hybrid's encoder layout: map -> 128, per-bullet MLP pooled -> 64, scalars -> 128, trunk 256.
+    """Map -> 128, per-bullet MLP pooled -> 64, scalars -> 128, trunk 256.
 
-    One deliberate departure: the map branch is an MLP rather than Hybrid's
-    two-layer CNN. On this machine's MPS backend a 3x3 conv over a 12x10 grid
+    The map branch is an MLP rather than a convolution. On this machine's MPS
+    backend a 3x3 conv over a 12x10 grid
     costs ~7x an MLP of the same output width (296 ms vs 39 ms per 4096-row
     forward+backward), which would make the update, not the environment, the
     bottleneck. The grid is small and position matters, so an MLP loses little.
@@ -236,6 +247,27 @@ class ActorCritic(nn.Module):
         s = self.scalars(scalars)
         z = self.trunk(torch.cat([m, b, s], 1))
         return self.actor(z), self.critic(z).squeeze(-1)
+
+
+def model_weights(state: dict) -> dict:
+    """A checkpoint's weights in the current schema.
+
+    A schema-24 network is widened with zero columns for the first-strike
+    pair, so it acts exactly as before and can be fine-tuned from there.
+    """
+    weights = dict(state["model"])
+    if state["schema"] == PREVIOUS_SCHEMA:
+        w = weights["scalars.0.weight"]
+        weights["scalars.0.weight"] = torch.cat([w, w.new_zeros(w.shape[0], FIRST_STRIKE_DIM)], 1)
+    else:
+        assert state["schema"] == OBS_SCHEMA, f"checkpoint schema {state['schema']} != {OBS_SCHEMA}"
+    return weights
+
+
+def blind_first_strike(model):
+    """The matched control: hold the first-strike input columns at zero."""
+    with torch.no_grad():
+        model.scalars[0].weight[:, -FIRST_STRIKE_DIM:] = 0.0
 
 
 @torch.inference_mode()
@@ -284,7 +316,14 @@ class Config:
     snapshot_every: int = 1_048_576  # steps between frozen ancestors
     pool_size: int = 8  # most recent ancestors kept in the league
     seed: int = 1
-    wall_sliding: bool = False
+    # False is the matched control: the env still computes the first-strike
+    # pair (same cost per frame), but the network's weights on it stay zero.
+    first_strike: bool = True
+    # Reward for a mutual kill; None keeps the environment's default (-0.1).
+    double_death_reward: float = -0.1
+    # Start from another run's checkpoint: its weights and its frozen pool, with
+    # this run's own schedule over `total_steps`. Empty starts from scratch.
+    init_from: str = ""
     # CPU by default: with other GPU tenants on this machine MPS ran the
     # update slower than eight CPU threads (263 ms vs 96 ms per minibatch).
     device: str = "cpu"
@@ -340,21 +379,28 @@ def train(cfg: Config, resume: bool):
     latest = run_dir / "latest.pt"
     if resume:
         state = torch.load(latest, map_location="cpu", weights_only=False)
-        assert state["schema"] == OBS_SCHEMA, f"checkpoint schema {state['schema']} != {OBS_SCHEMA}"
-        model.load_state_dict(state["model"])
+        model.load_state_dict(model_weights(state))
         # Adam state and the schedule position travel together, or the
         # learning rate silently restarts at its initial value.
         optimiser.load_state_dict(state["optimiser"])
         trained_steps, updates = state["trained_steps"], state["updates"]
         pool = [run_dir / name for name in state["pool"]]
         print(f"resumed at {trained_steps:,} steps, update {updates}, pool {len(pool)}")
+    elif cfg.init_from:
+        source = Path(cfg.init_from)
+        state = torch.load(source, map_location="cpu", weights_only=False)
+        model.load_state_dict(model_weights(state))
+        pool = [source.parent / name for name in state.get("pool", [])]
+        print(f"initialised from {source} ({state['trained_steps']:,} steps), pool {len(pool)}")
+    if not cfg.first_strike:
+        blind_first_strike(model)
     (run_dir / "config.json").write_text(json.dumps(asdict(cfg), indent=2))
 
     # Frozen opponents run on CPU: small batches, no device sync per frame.
     frozen = []
     for path in pool:
         net = ActorCritic()
-        net.load_state_dict(torch.load(path, map_location="cpu", weights_only=False)["model"])
+        net.load_state_dict(model_weights(torch.load(path, map_location="cpu", weights_only=False)))
         net.eval()
         frozen.append(net)
     # Recent outcomes against each ancestor slot, for threat weighting. Not
@@ -363,7 +409,8 @@ def train(cfg: Config, resume: bool):
 
     envs = WorkerPool(cfg.workers, cfg.envs_per_worker,
                       TRAIN_SEED_BASE + cfg.seed * 1_000_003 + trained_steps,
-                      league_weights(cfg, len(frozen), threat), cfg.wall_sliding)
+                      league_weights(cfg, len(frozen), threat),
+                      cfg.double_death_reward)
     n_workers, e = envs.n_workers, envs.e
     budget = envs.n * cfg.rollout
     # Workers advance independently, so a worker on a performance core may
@@ -510,6 +557,8 @@ def train(cfg: Config, resume: bool):
                     loss.backward()
                     nn.utils.clip_grad_norm_(model.parameters(), cfg.max_grad_norm)
                     optimiser.step()
+                    if not cfg.first_strike:
+                        blind_first_strike(model)
                     with torch.no_grad():
                         kls.append(((ratio - 1) - (logp - b_logp[idx])).mean().item())
                         clipfracs.append(((ratio - 1).abs() > cfg.clip).float().mean().item())
@@ -626,7 +675,7 @@ def shielded_action(model, obs, mask, rng, greedy=False, shield="none"):
 
 
 def evaluate(path: Path, opponent: str, games: int, seed: int, workers: int, greedy: bool,
-             wall_sliding: bool, shield: str = "none", out: Path | None = None):
+             shield: str = "none", out: Path | None = None):
     """True result on seeds seed .. seed+games-1, one round each, in parallel envs.
 
     A worker given base seed s hands its envs seeds s+1, s+2, ... at start, so
@@ -635,9 +684,8 @@ def evaluate(path: Path, opponent: str, games: int, seed: int, workers: int, gre
     seeds can be compared pairwise.
     """
     state = torch.load(path, map_location="cpu", weights_only=False)
-    assert state["schema"] == OBS_SCHEMA
     model = ActorCritic()
-    model.load_state_dict(state["model"])
+    model.load_state_dict(model_weights(state))
     model.eval()
     slot = {"laika": 0, "tactical": 1}[opponent]
     weights = [0.0, 0.0]
@@ -653,7 +701,7 @@ def evaluate(path: Path, opponent: str, games: int, seed: int, workers: int, gre
         n = min(per, seed + games - start)
         if n <= 0:
             break
-        procs.append(WorkerPool(1, n, start - 1, weights, wall_sliding))
+        procs.append(WorkerPool(1, n, start - 1, weights))
     live = [np.ones(p.n, bool) for p in procs]
     rng = np.random.default_rng(seed)
     per_seed = {}
@@ -690,6 +738,126 @@ def evaluate(path: Path, opponent: str, games: int, seed: int, workers: int, gre
     return result
 
 
+# -------------------------------------------------------------------- distil
+
+def load_labels(dirs):
+    """Concatenate `web/rl/teacher-labels.mjs` output directories."""
+    parts = {k: [] for k in ("obs", "mask", "probs", "scores", "danger")}
+    for d in dirs:
+        meta = json.loads((d / "meta.json").read_text())
+        for w in range(meta["workers"]):
+            parts["obs"].append(np.fromfile(d / f"w{w}.obs.bin", np.float32).reshape(-1, OBS_DIM))
+            parts["mask"].append(np.fromfile(d / f"w{w}.mask.bin", np.uint8).reshape(-1, BULLET_SLOTS))
+            parts["probs"].append(np.fromfile(d / f"w{w}.probs.bin", np.float32).reshape(-1, ACTIONS))
+            parts["scores"].append(np.fromfile(d / f"w{w}.scores.bin", np.float32).reshape(-1, ACTIONS))
+            parts["danger"].append(np.fromfile(d / f"w{w}.danger.bin", np.uint8))
+    return {k: np.concatenate(v) for k, v in parts.items()}
+
+
+def teacher_targets(p_old: torch.Tensor, scores: torch.Tensor, beta: float) -> torch.Tensor:
+    """The student's own distribution tilted by the teacher's rollout scores.
+
+    Scored actions are reweighted by exp(beta * (score - mean score)); an
+    unscored action is charged the worst score seen. Frames where every
+    candidate tied, and calm frames, keep the student's distribution: they
+    anchor everything the teacher had nothing to say about.
+    """
+    scored = ~torch.isnan(scores)
+    any_scored = scored.any(1, keepdim=True)
+    s = torch.where(scored, scores, torch.full_like(scores, float("inf")))
+    worst = s.min(1, keepdim=True).values
+    s = torch.where(scored, scores, worst)
+    s = torch.where(any_scored, s, torch.zeros_like(s))
+    tilt = beta * (s - s.mean(1, keepdim=True))
+    # In log space: exp(beta * spread) overflows float32 from beta ~ 45.
+    return torch.softmax(torch.log(p_old.clamp_min(1e-30)) + tilt, 1)
+
+
+def shuffled_scores(scores: torch.Tensor, seed: int) -> torch.Tensor:
+    """Control: permute each frame's scores among the actions it scored.
+
+    Keeps how much the target sharpens and leaves unscored actions alone, but
+    breaks which action the teacher preferred.
+    """
+    g = torch.Generator().manual_seed(seed)
+    out = scores.clone()
+    for i in torch.nonzero((~torch.isnan(scores)).sum(1) > 1).flatten().tolist():
+        cols = torch.nonzero(~torch.isnan(scores[i])).flatten()
+        out[i, cols] = scores[i, cols[torch.randperm(len(cols), generator=g)]]
+    return out
+
+
+def distil(init: Path, data: list[Path], run: str, beta: float, epochs: int, lr: float,
+           batch: int, seed: int, threads: int, shuffle: bool = False):
+    """Supervised step of expert iteration: pull the policy toward the MPC teacher.
+
+    Loss is KL(target || policy) over every recorded frame, with targets from
+    `teacher_targets`; the critic is not trained. The result is a normal
+    checkpoint for `eval` and `export`.
+    """
+    torch.manual_seed(seed)
+    torch.set_num_threads(threads)
+    state = torch.load(init, map_location="cpu", weights_only=False)
+    model = ActorCritic()
+    model.load_state_dict(model_weights(state))
+    d = load_labels(data)
+    obs = torch.from_numpy(d["obs"])
+    mask = torch.from_numpy(d["mask"].astype(np.bool_))
+    scores = torch.from_numpy(d["scores"])
+    if shuffle:
+        scores = shuffled_scores(scores, seed)
+    n = obs.shape[0]
+    informative = (~torch.isnan(scores)).sum(1) > 0
+    s_fill = torch.nan_to_num(scores, nan=-9.0)
+    spread = torch.where(informative, s_fill.max(1).values
+                         - torch.where(torch.isnan(scores), torch.full_like(scores, 9.0), scores).min(1).values,
+                         torch.zeros(n))
+    print(f"{n:,} frames, {int(informative.sum()):,} scored, {int((spread > 0).sum()):,} with a preference")
+    model.eval()
+    with torch.inference_mode():
+        p_old = torch.cat([torch.softmax(model(obs[i:i + 8192], mask[i:i + 8192])[0], -1)
+                           for i in range(0, n, 8192)])
+        target = teacher_targets(p_old, scores, beta)
+    run_dir = RUNS / run
+    run_dir.mkdir(parents=True, exist_ok=True)
+    params = [p for name, p in model.named_parameters() if not name.startswith("critic")]
+    opt = torch.optim.Adam(params, lr=lr, eps=1e-5)
+    pref = spread > 0
+    for epoch in range(epochs):
+        model.train()
+        perm = torch.randperm(n)
+        total = 0.0
+        for i in range(0, n, batch):
+            idx = perm[i:i + batch]
+            logits, _ = model(obs[idx], mask[idx])
+            logp = torch.log_softmax(logits, -1)
+            t = target[idx]
+            loss = (t * (torch.log(t.clamp_min(1e-12)) - logp)).sum(1).mean()
+            opt.zero_grad(set_to_none=True)
+            loss.backward()
+            nn.utils.clip_grad_norm_(params, 0.5)
+            opt.step()
+            total += loss.item() * len(idx)
+        model.eval()
+        with torch.inference_mode():
+            p_new = torch.cat([torch.softmax(model(obs[i:i + 8192], mask[i:i + 8192])[0], -1)
+                               for i in range(0, n, 8192)])
+            best = torch.where(torch.isnan(scores), torch.full_like(scores, -9.0), scores).argmax(1)
+            gain_old = (p_old * torch.nan_to_num(scores, nan=0.0)).sum(1)[pref].mean().item()
+            gain_new = (p_new * torch.nan_to_num(scores, nan=0.0)).sum(1)[pref].mean().item()
+            print(f"epoch {epoch + 1}: KL {total / n:.4f} | on preference frames: "
+                  f"p(best) {p_old.gather(1, best[:, None])[pref].mean():.3f} -> "
+                  f"{p_new.gather(1, best[:, None])[pref].mean():.3f}, expected score "
+                  f"{gain_old:+.3f} -> {gain_new:+.3f} | calm drift "
+                  f"{(p_old - p_new).abs().sum(1)[~pref].mean():.4f}", flush=True)
+    out = run_dir / "latest.pt"
+    atomic_save({"schema": OBS_SCHEMA, "model": model.state_dict(),
+                 "trained_steps": state["trained_steps"], "pool": [],
+                 "distil": {"init": str(init), "data": [str(p) for p in data], "beta": beta,
+                            "epochs": epochs, "lr": lr, "shuffle": shuffle}}, out)
+    print(f"wrote {out}")
+
+
 # --------------------------------------------------------------------- export
 
 def export(path: Path, out: Path, label: str):
@@ -702,9 +870,8 @@ def export(path: Path, out: Path, label: str):
     import base64
 
     state = torch.load(path, map_location="cpu", weights_only=False)
-    assert state["schema"] == OBS_SCHEMA
     model = ActorCritic()
-    model.load_state_dict(state["model"])
+    model.load_state_dict(model_weights(state))
     model.eval()
     tensors = {
         name: {"shape": list(t.shape),
@@ -745,7 +912,7 @@ def main():
     for f_ in Config.__dataclass_fields__.values():
         flag = "--" + f_.name.replace("_", "-")
         if f_.type in ("bool", bool):
-            tr.add_argument(flag, action="store_true", default=f_.default)
+            tr.add_argument(flag, action=argparse.BooleanOptionalAction, default=f_.default)
         else:
             tr.add_argument(flag, type=type(f_.default), default=f_.default)
     tr.add_argument("--resume", action="store_true")
@@ -756,22 +923,35 @@ def main():
     ev.add_argument("--seed", type=int, default=970000)
     ev.add_argument("--workers", type=int, default=8)
     ev.add_argument("--sample", action="store_true", help="sample actions instead of argmax")
-    ev.add_argument("--wall-sliding", action="store_true")
     ev.add_argument("--shield", choices=SHIELDS, default="none")
     ev.add_argument("--out", type=Path, default=None, help="write the result with per-seed outcomes")
     ex = sub.add_parser("export")
     ex.add_argument("checkpoint", type=Path)
     ex.add_argument("--out", type=Path, default=ROOT / "web" / "rl" / "models" / "ppo-league.js")
     ex.add_argument("--label", default="League PPO")
+    di = sub.add_parser("distil")
+    di.add_argument("init", type=Path)
+    di.add_argument("--data", type=Path, nargs="+", required=True)
+    di.add_argument("--run", required=True)
+    di.add_argument("--beta", type=float, default=4.0)
+    di.add_argument("--epochs", type=int, default=3)
+    di.add_argument("--lr", type=float, default=5e-5)
+    di.add_argument("--batch", type=int, default=2048)
+    di.add_argument("--seed", type=int, default=1)
+    di.add_argument("--threads", type=int, default=8)
+    di.add_argument("--shuffle", action="store_true", help="control: permute teacher scores per frame")
     args = parser.parse_args()
     if args.command == "train":
         cfg = Config(**{k: getattr(args, k) for k in Config.__dataclass_fields__})
         train(cfg, args.resume)
     elif args.command == "export":
         export(args.checkpoint, args.out, args.label)
+    elif args.command == "distil":
+        distil(args.init, args.data, args.run, args.beta, args.epochs, args.lr, args.batch,
+               args.seed, args.threads, args.shuffle)
     else:
         evaluate(args.checkpoint, args.opponent, args.games, args.seed, args.workers,
-                 not args.sample, args.wall_sliding, args.shield, args.out)
+                 not args.sample, args.shield, args.out)
 
 
 if __name__ == "__main__":

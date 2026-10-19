@@ -11,20 +11,20 @@ export async function generateMetadata(): Promise<Metadata> {
   const socialImage = new URL("/og.png", origin).toString();
   return {
     title: "Tank Trouble AI Arena",
-    description: "浏览器原生 Tank Trouble AI 对战：Tactical 挑战 Laika、人机对战与自博弈。",
+    description: "浏览器里的 Tank Trouble AI 对战：强化学习 AI 对战原版 Laika、人机对战与 AI 对打。",
     icons: {
       icon: "/favicon.svg",
       shortcut: "/favicon.svg",
     },
     openGraph: {
       title: "Tank Trouble AI Arena",
-      description: "Tank Trouble Tactical vs Laika — 浏览器原生实时搜索对战。",
+      description: "强化学习 AI 对战原版 Laika，95.5% 真胜率，全部在浏览器内运行。",
       images: [{ url: socialImage, width: 1536, height: 864 }],
     },
     twitter: {
       card: "summary_large_image",
       title: "Tank Trouble AI Arena",
-      description: "Tank Trouble Tactical vs Laika — 浏览器原生实时搜索对战。",
+      description: "强化学习 AI 对战原版 Laika，95.5% 真胜率，全部在浏览器内运行。",
       images: [socialImage],
     },
   };

@@ -1,73 +1,135 @@
-# 项目报告：从反编译到自主学会击败 Laika
+# Tank Trouble AI — method and results
 
-**日期**：2026-07-07 ｜ **状态**：蒸馏路径打通，专家迭代待启动
+Two agents play the original game's AI, Laika, on this repository's engine
+([ENGINE.md](ENGINE.md)): **Tactical**, a real-time MPC search, and **League
+PPO**, a learned policy distilled from an MPC teacher. League PPO is the one the
+web demo runs.
 
----
+## Results
 
-## 一、项目是什么
+| Agent | True win rate vs Laika | Decision time (p50 / p95) |
+|---|---:|---:|
+| **League PPO** (deployed) | **95.5%** (10,000 rounds) | 2.3 / 3.3 ms |
+| Tactical | 91.0–91.7% (three 2,000-round sets) | 1.6 / 9.2 ms |
 
-把 2000 年代 Flash 游戏 Tank Trouble 反编译并 1:1 移植成 Python（物理/常量/帧序
-与原版一致，含原版脚本 AI「Laika」），在其上探索一个问题：
+**Protocol.** One round per seed, the agent on tank 0 and Laika on tank 1; a
+round both tanks survive for 30 s is a draw; only surviving the settlement
+window is a win, so a kill followed by death to a bullet still in flight is a
+double KO, not a win. Every comparison is paired by seed on never-used seeds and
+was pre-registered — arms, seeds, decision rule and SHA-256 of the model and
+code fixed before the first round. Latencies are Node measurements on an idle
+machine.
 
-> **AI 能否自主学会击败一个手写的游戏 AI——学到什么程度，用什么方法最有效？**
+| Pre-registered test | Seeds | Result |
+|---|---|---|
+| PPO before distillation − Tactical | three sets of 2,000 | +2.85, +2.10, +3.65pp (each p < 0.02) |
+| MPC teacher − PPO before distillation | 2,000 | +1.80pp, CI [+0.49, +3.11], p = 0.009 |
+| Distilled PPO − PPO before distillation | 10,000 | **+1.59pp, CI [+1.02, +2.16], p = 5e-8** |
 
-评估口径自始至终：**真胜率**（原版计分，先杀后死=双亡不得分），1000+ 局全新
-种子定级，换冠军需双种子基复验。
+A single 2,000-round evaluation moves by about ±1pp (actions are sampled), so
+effects near 1pp need ~10,000 paired rounds: a 2,000-round test of the
+distilled model gave +0.65pp, not significant, before the 10,000-round test
+confirmed it.
 
-## 二、最终成绩单（三条技术路线）
+## Tactical: real-time MPC search
 
-| 路线 | 代表 | 真胜率 | 性质 |
-|---|---|---:|---|
-| A·无模型 RL | P17（BC 热启动+导航观测+PPO） | 36.4% | 训练出来的，净胜 Laika |
-| B·决策时搜索 | MPC（无未来函数沙盘推演） | **96.0%** | 编写出来的，测量了游戏的规划上限 |
-| **C·搜索蒸馏** | **P21b 评分网络** | **62.2 / 63.8**\* | **自主学会的**——纯前向网络，零搜索，8.6ms/决策 |
+Every frame, each candidate action is rolled forward 36 frames in a sandbox
+copy of the game, with Laika re-run by its own script from a fresh state (no
+hidden state is read). Candidates are scored by progress toward positions from
+which a shot connects (an inverse ricochet density field), shots the engine's
+ballistics verifies as hits, and exposure. A bullet-safety search vetoes moves
+that die, a settlement audit vetoes shots that would end in a double KO, a
+topological chase breaks stalls, and the chosen move is held for a few frames.
+Its main failure is stalling: 59–73 of 2,000 rounds end undecided at 30 s.
 
-\* 正式双基定级：1000 局@970000 = 62.2%，500 局@990000 = 63.8%（双亡 8.2/8.6%）。
-参照系：random 0.5% ｜ 手写猎杀脚本 22.5% ｜ Laika 镜像自打 40.2%。
+## League PPO
 
-**C 路线是项目的核心成果**：第一个同时满足「纯网络、大幅净胜 Laika、判断力
-从系统自身的前瞻推演中学得」的智能体。观测口径脚注：含物理预演特征
-（只提供事实如"往左走 12 帧后中弹"，不提供价值判断；无搜索、无候选比较）。
+**Environment** (`web/rl/duel-env.js`). One round per episode on a fresh maze.
+Reward only at the end: win +1 (decaying to +0.5 at 30 s), double KO −0.1,
+loss or draw −1, plus up to +0.25 for not changing action more often than 13%
+of frames.
 
-## 三、方法演进（21 轮实验的主干）
+**Observation: 1030 visible facts.** Maze grid; wall rays; both tanks' pose,
+motion, ammo and readiness; BFS navigation; whether each barrel's current shot
+hits; every bullet with a wall-exact 75-frame forecast; threat summary; round
+phase; own recent actions; `dodge_safety` — for each of nine moves, whether
+holding it for 24 frames survives; and how many frames each side must turn
+before it holds a hit. Never the seed, the random stream, or the opponent's
+buttons or plan.
 
+**Network.** Map MLP (840 → 256 → 128), per-bullet MLP pooled by mean and max
+(→ 64), scalar MLP (90 → 128), trunk 256, actor 18 actions (3 throttle × 3
+turn × fire), critic 1. The browser runs the same forward pass in plain JS,
+matched to PyTorch within 1e-5.
+
+**Training** (`training/js_league_ppo.py`). PPO, 288 environments × 128 steps,
+γ 0.999, λ 0.95, clip 0.2. Opponents: 10% Laika, 10% Tactical, 80% frozen
+ancestors (a ring of eight). 30M steps from scratch, continued to 100M without
+gain, then 20M at learning rate 1e-4 (+1.8pp). About 2,500–3,000 steps/s on a
+10-core M4 with nine Node workers.
+
+**Safety shield.** At inference, drop every move `dodge_safety` says dies
+(when one survives) and drop fire while the current shot would hit the shooter.
+Free to compute and worth +3.4pp (91.5% → 94.85% on development seeds).
+
+## MPC teacher and distillation
+
+**Why.** Replaying each failed round from k frames before the failure and
+resampling the policy: from 32 frames (1.3 s) earlier, 97% of double KOs and
+79% of losses can be turned into wins, and simply resampling the policy
+wins about half of them; from 8 frames earlier almost none can. The policy plays well but
+loses coin flips at decisive moments.
+
+**Teacher** (`web/rl/ppo-mpc.js`). In danger — a barrel lines up, a bullet is
+on course, or a move is forecast to die (about one frame in seven) — each of
+the policy's top actions is played out 24 frames by the shielded policy itself
+in the same fair sandbox, and the best is taken. +1.8pp over the policy, but
+0.2–0.6 s per decision: too slow for the 40 ms frame.
+
+**Distillation** (`web/rl/teacher-labels.mjs`, `distil` in the trainer). The
+policy plays 2,000 rounds; on its 163,086 danger frames the teacher scores its
+top actions (4 candidates × 4 rollouts). The target is the policy's own
+distribution tilted toward the teacher, π*(a) ∝ π(a)·exp(16·score(a)); three
+epochs of KL(π* ‖ π). Same network and cost, +1.59pp. A control with the
+teacher's scores shuffled among candidates gains 1.8pp less on development
+seeds, so most of the gain is the teacher's choice, not just sharper
+sampling. A second round on the distilled policy's own states added nothing:
+the student has caught up with this teacher.
+
+## What did not help
+
+| Idea | Result |
+|---|---|
+| Training past 30M steps | 93.60% → 93.05% at 100M |
+| Pricing the double KO at −0.6 instead of −0.1 | no difference |
+| Deep shield (veto the sampled action if a sandbox rollout dies) | no gain over the plain shield |
+| Handing face-offs to Tactical | fewer double KOs, more losses, no net gain |
+| First-strike observation (matched 3-seed ablation) | steadier fine-tuning, no gain over the policy it started from |
+| A second distillation round | no gain |
+
+## Reproduction
+
+```bash
+# train (r3 from scratch, later continued to 100M; r6 fine-tunes it)
+python3 -u training/js_league_ppo.py train --run r3 --workers 9 --total-steps 30000000
+python3 -u training/js_league_ppo.py train --run r6 --workers 9 --total-steps 20000000 \
+    --lr 0.0001 --entropy-coef 0.003 --critic-warmup-updates 10 \
+    --init-from training/runs/js_league/r3/latest.pt
+
+# teacher labels, distillation, export to the browser
+cd web && node rl/teacher-labels.mjs ../training/runs/js_league/distill/labels_r1 80000000 2000 9
+cd .. && python3 -u training/js_league_ppo.py distil training/runs/js_league/r6/latest.pt \
+    --data training/runs/js_league/distill/labels_r1 --run distill/b16 --beta 16
+python3 training/js_league_ppo.py export training/runs/js_league/distill/b16/latest.pt
+
+# grade any agent against Laika under the protocol above
+cd web && node rl/eval-agent.mjs ppo-league 9000000 5000
+cd web && node rl/eval-agent.mjs p27-js-tactical-v2 9000000 5000
 ```
-阶段1  奖励工程 (v1→P14):        5% → 35% 后八连败饱和
-       教训: 信息>激励; 行为矫正会破坏已收敛策略的自平衡
-阶段2  观测补全 (P2/P17):        弹道预演+8, 导航+3 —— 两针全胜
-       教训: "学不会"大多是"看不见"
-阶段3  模仿混合 (P15):           BC 克隆 Laika 做 RL 起点, 3 倍学习速度
-       教训: 老师棋力≠可教性; 有状态策略无法被单帧网络克隆
-阶段4  搜索范式 (MPC/混合体):     96%, 击穿一切; K=12 剪枝后 36ms 实时
-       教训: 有精确模型就该搜索; 搜索是测量仪和老师, 不是选手
-阶段5  蒸馏 (P19→P21b):          argmax 标签 9% → 评分标签+全知观测 62-64%
-       教训: ①并列陷阱(argmax 标签自相矛盾/top-1 指标数学上限 11.9%),
-             正确度量=后悔值(93.6% 决策够好, 中位后悔 0)
-             ②动作条件信息必须在观测里, 网络才可能学会动作排序
-```
 
-## 四、五条最值钱的教训（跨项目通用）
+## Acknowledgements
 
-1. **口径决定一切**：destroy 口径虚高 15-29 点；训练目标必须定义在真实规则上。
-2. **测量纪律**：100 局评估噪声 ±9 点反复误导决策；只信 1000+ 局新种子双基。
-3. **信息 > 激励 > 容量**：观测两针 +11；奖励八连败；8.6 倍参数只值 +1%。
-4. **并列陷阱**：多解任务中 argmax 标签自相矛盾、top-1 指标失效——用软目标
-   （评分/分布）当标签，用后悔值当指标。
-5. **微调窗口 ≈2M 步**：恒定 lr 续训必崩（60M 步实证）；长训需调度/锚定。
-
-## 五、下一步
-
-1. **专家迭代第 1 轮**（本机）：学生自打的局回炉请 MPC 重标（DAgger），
-   靶向 6.4% 致死误判与 9% 双亡 → 目标 75%+
-2. **算力放大**（租 64 核 CPU）：每轮采集小时级→分钟级，冲 85-95%
-3. **特征自举**（纯度赎回）：训感知网络从原始几何预测预演特征，替换手写
-   前端，"网络自己长出眼睛"
-4. **在线平台适配**（V1-V3）：视觉→影子状态重建栈；观测契约已兼容
-   （全部输入屏幕可回推）；仅限私房/本地对局（公开匹配打真人=对人开挂）
-
-## 六、资产清单
-
-- 代码全部入库；模型线下传（必传：`p17_nav_best.zip`、`p21b_scorenet.pt`）
-- 完整台账：`training/EXPERIMENTS.md`（21 轮实验，每针可溯源）
-- 观看命令：`python3 training/watch.py --policy scorenet`（蒸馏网络）
-  / `--policy hybrid --k 12`（96% 搜索体）/ `--policy model`（RL 冠军）
+The duel observation and reward build on
+[Cichlider/killfield](https://github.com/Cichlider/killfield) (MIT), as does the
+planner under `web/lib/killfield-runtime/` that Tactical and the MPC sandbox
+use; its license and notice are retained.

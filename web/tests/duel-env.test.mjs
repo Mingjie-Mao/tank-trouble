@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import * as C from "../lib/engine/constants.js";
 import { Game } from "../lib/engine/game.js";
 import {
   ACTIONS, BULLET_OFFSET, BULLET_SLOTS, BULLET_DIM, DuelEpisode,
   DUEL_FRAMES, OBS_DIM, OpponentKind, Outcome, PHASE_OFFSET, SELF_THREAT_COUNT_OFFSET,
-  dodgeSafety, dodgeSafetyReference, outcomeReward, styleBonus, winReward,
+  dodgeSafety, dodgeSafetyReference, outcomeReward, styleBonus, turnsToHit, winReward,
 } from "../rl/duel-env.js";
 
 function lcg(seed) {
@@ -28,8 +29,8 @@ function playRandom({ seeds, kind, visit }) {
   }
 }
 
-test("the observation is 1028 values, all finite and inside [-1, 1]", () => {
-  assert.equal(OBS_DIM, 1028);
+test("the observation is 1030 values, all finite and inside [-1, 1]", () => {
+  assert.equal(OBS_DIM, 1030);
   const obs = new Float32Array(OBS_DIM);
   const mask = new Uint8Array(BULLET_SLOTS);
   playRandom({
@@ -46,6 +47,62 @@ test("the observation is 1028 values, all finite and inside [-1, 1]", () => {
       }
     },
   });
+});
+
+/** turnsToHit spelled out with the engine's own hit tests and a real barrel turn. */
+function turnsToHitReference(game, shooter, target) {
+  if (!shooter.alive || !target.alive) return -1;
+  const hits = (angle) => {
+    const saved = shooter.rotation;
+    shooter.rotation = angle;
+    const rad = ((angle - 90) * Math.PI) / 180;
+    const scale = game.scale;
+    let x = shooter.x + Math.cos(rad) * scale * 4.5 / 16;
+    let y = shooter.y + Math.sin(rad) * scale * 4.5 / 16;
+    let xs = Math.cos(rad) * C.BULLETSPEED * (scale / 50);
+    let ys = Math.sin(rad) * C.BULLETSPEED * (scale / 50);
+    let result = false;
+    for (let life = C.BULLETLIFETIME / 3; life > 0; life -= 1) {
+      const px = x;
+      const py = y;
+      x += xs;
+      y += ys;
+      if (game.wallHit(x, y)) {
+        const a = game.wallHit(px - xs, py + ys);
+        const b = game.wallHit(px + xs, py - ys);
+        if (a && !b) ys = -ys;
+        else if (b && !a) xs = -xs;
+        else { xs = -xs; ys = -ys; }
+        x = px + xs;
+        y = py + ys;
+      }
+      if (target.pointInBbox(x, y) && target.pointInShape(x, y)) { result = true; break; }
+      if (shooter.pointInBbox(x, y) && shooter.pointInShape(x, y)) break;
+    }
+    shooter.rotation = saved;
+    return result;
+  };
+  for (let k = 0; k <= 18; k++) {
+    if (hits(shooter.rotation - 10 * k)) return k;
+    if (k > 0 && k < 18 && hits(shooter.rotation + 10 * k)) return k;
+  }
+  return -1;
+}
+
+test("first strike matches a turn-and-shoot reference, both seats", () => {
+  const seen = new Set();
+  playRandom({
+    seeds: [21, 22, 23, 24, 25], kind: OpponentKind.LAIKA,
+    visit(ep) {
+      const [a, b] = ep.game.tanks;
+      for (const [s, t] of [[a, b], [b, a]]) {
+        const got = turnsToHit(ep.game, s, t);
+        assert.equal(got, turnsToHitReference(ep.game, s, t), `frame ${ep.frames}`);
+        seen.add(got);
+      }
+    },
+  });
+  assert.ok(seen.has(0) && seen.has(-1) && seen.size > 8, `values seen: ${[...seen]}`);
 });
 
 test("fast dodgeSafety is bit-identical to the nine-rollout reference", () => {
@@ -85,7 +142,7 @@ test("the engine's wall grid answers exactly like testing every wall", () => {
   }
 });
 
-test("my own round is not a threat to me until it has left my hull", () => {
+test("my own unbounced round is never flagged as a threat to me", () => {
   const ep = new DuelEpisode(19, OpponentKind.FROZEN);
   ep.step(9, 8); // stand still and fire; the opponent stands still
   const obs = new Float32Array(OBS_DIM);
@@ -94,7 +151,7 @@ test("my own round is not a threat to me until it has left my hull", () => {
   assert.ok(mask[0], "the shot should occupy slot 0");
   const base = BULLET_OFFSET;
   assert.equal(obs[base + 4], 1, "the bullet is mine");
-  assert.equal(obs[base + 5], 0, "and has not left my hull yet");
+  assert.equal(obs[base + 5], 0, "and has not bounced");
   assert.equal(obs[base + 7], 0, "so it cannot be coming for me");
   assert.equal(obs[SELF_THREAT_COUNT_OFFSET], 0);
   assert.equal(BULLET_SLOTS * BULLET_DIM, 100);
@@ -171,4 +228,13 @@ test("the PPO safety shield removes movements dodge_safety predicts die", async 
   const overridden = shieldProbabilities(probs, obs);
   for (let a = 0; a < ACTIONS; a++) assert.equal(probs[a] > 0, (a & 1) === 0, `action ${a}`);
   assert.equal(overridden, false, "the argmax of a uniform distribution is action 0, a no-fire action");
+});
+
+test("a run can price the mutual kill without moving the rest of the scale", () => {
+  assert.equal(outcomeReward(Outcome.DOUBLE_DEATH, 100), -0.1);
+  assert.equal(outcomeReward(Outcome.DOUBLE_DEATH, 100, -0.6), -0.6);
+  assert.equal(outcomeReward(Outcome.LOSS, 100, -0.6), -1);
+  assert.equal(outcomeReward(Outcome.WIN, 100, -0.6), 1);
+  const ep = new DuelEpisode(1, OpponentKind.LAIKA, { doubleDeathReward: -0.6 });
+  assert.equal(ep.doubleDeathReward, -0.6);
 });

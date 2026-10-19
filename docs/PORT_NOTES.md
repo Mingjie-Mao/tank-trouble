@@ -23,8 +23,11 @@
 
 ### 帧率与执行顺序
 - 25 FPS 固定帧步进 (SWF header)。
-- 每帧顺序: `_root` 逻辑 → tank0 → tank1(Laika) → 子弹(按创建序)。
-- **当帧发射的子弹下一帧才开始移动** (Flash attachMovie 语义)。
+- 每帧顺序: 子弹(后创建的先) → tank1(Laika 在其更新内决策) → tank0 → `_root` 回合逻辑。
+  依据 AVM1 执行列表"新建剪辑头插、后创建先执行"(Ruffle `core/src/avm1/runtime.rs`
+  的 `add_to_exec_list` / `run_frame`)。
+- **当帧发射的子弹下一帧才开始移动**，且先于发射者移动：首次命中判定时已飞出 4.5 px、
+  离开炮管，所以无需发射者豁免；贴墙开枪会被自己的反弹弹打死 (`test_original_port.py` [4b])。
 
 ### 坦克移动 (tank:322-410)
 - 每帧分 **5 子步** (STEPS=5)；先无碰撞走完 5 步，若终点碰墙则回滚逐步重走。

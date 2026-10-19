@@ -61,8 +61,9 @@ export const TANK_DISPLAY_SCALE_FACTOR = 0.55 / 100.0;
 export const TANK_BOUNDS_LOCAL = [-30.5, -55.0, 30.5, 40.5];
 export const TANK_BARREL_HALF_WIDTH = TANK_TURRET_WIDTH / 6.0;
 export const TANK_BARREL_TIP_Y = (-TANK_TURRET_HEIGHT / 16.0) * 11.0;
-// Bullet-vs-tank hit shape: hull rectangle union barrel rectangle.
-export const TANK_SHAPE_BARREL_HALF_WIDTH = 8.5;
+// Bullet-vs-tank hit shape: hull rectangle union barrel rectangle. The barrel
+// is x in [-7.5, 7.5], y in [-55, -21.25] (SWF shapes 80/82, turret sprite 134).
+export const TANK_SHAPE_BARREL_HALF_WIDTH = 7.5;
 export const TANK_SHAPE_BARREL_TIP_Y = -55.0;
 
 export const BULLET_VISUAL_RADIUS = 3.5;

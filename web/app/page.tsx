@@ -3,7 +3,7 @@ import { Arena } from "./Arena";
 
 export const metadata: Metadata = {
   title: "Tank Trouble AI Arena",
-  description: "P27b、实时规划和自博弈的本地可视化对战场。",
+  description: "强化学习 AI 对战 Tank Trouble 原版 AI Laika。",
 };
 
 export default function Home() {

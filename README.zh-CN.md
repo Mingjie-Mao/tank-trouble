@@ -2,40 +2,39 @@
 
 # Tank Trouble AI
 
-基于经典 Flash 游戏 **Tank Trouble** 的实时对战 AI 项目，探索强化学习（PPO）、模型预测控制（MPC）、策略蒸馏与安全规划在动态对抗环境中的应用。
+为经典 Flash 游戏 **Tank Trouble** 做的 AI，对手是游戏原版 AI Laika：一个是实时 MPC 搜索，一个是经 MPC 老师蒸馏的强化学习策略。
 
 在线演示：[https://tank-trouble-ai.pages.dev/](https://tank-trouble-ai.pages.dev/)
 
-## 核心实现
+## 结果
 
-- **游戏引擎**：基于原版 Flash 实现 Python 和 JavaScript 游戏引擎，复现坦克运动、碰撞、子弹反弹与迷宫生成，并通过逐帧对拍验证一致性。
-- **强化学习**：基于 PyTorch 实现 PPO / Actor-Critic、GAE 和联赛自博弈训练，结合动作条件化的存活预测与安全约束，提高策略稳定性。
-- **规划与蒸馏**：实现基于精确物理模拟的 MPC 搜索，结合行为克隆、专家迭代和动作评分蒸馏，探索将在线规划能力迁移至神经网络。
-- **实时对战**：实现浏览器端 AI 对战系统，支持人机对战、AI 自博弈、实时性能监控及自动化评测。
+| AI | 方法 | 对 Laika 真胜率 | 决策耗时（p95） |
+|---|---|---:|---:|
+| **League PPO**（网页演示） | PPO 自博弈 + 安全护盾，经 MPC 老师蒸馏 | **95.5%** | 3.3 ms |
+| Tactical | 实时 MPC 搜索 | 91.0–91.7% | 9.2 ms |
 
-## 实验结果
+在从未使用过的种子上做预注册测试：League PPO 1 万局，Tactical 三组各 2,000 局。先击杀、随后被仍在飞行的子弹打死算双亡，不算胜；30 秒未分胜负算平局。
 
-在当前自研 JavaScript 引擎的 2,000 局固定种子测试中：
+## 怎么做的
 
-| 方法 | 对 Laika 真胜率 |
-|---|---:|
-| League PPO + 安全护盾 | **94.3%** |
-| Tactical v2（MPC 搜索） | 92.2% |
+- **引擎**：基于反编译的原版 Flash 实现 Python 和 JavaScript 两版引擎，遵循原版的帧执行顺序，两者逐帧对拍一致。
+- **Tactical**：每帧把候选动作在沙盒里前推 36 帧，否决会被打死的移动和开火，僵持时拓扑追击。
+- **League PPO**：用 PyTorch 训练，对手为 Laika、Tactical 和自己的历史版本；只观测可见信息，并在动作上加安全护盾。再用 MPC 老师（前瞻模拟策略的候选动作）通过专家迭代蒸馏回网络：胜率提高 1.6 个百分点，每帧耗时不变。
 
-历史 Tactical Smooth 在旧引擎的独立留出测试中取得 **95.6%** 真胜率；由于后续更换物理引擎，该结果不代表当前版本表现。
+详见：[方法与结果](docs/REPORT.md) · [引擎](docs/ENGINE.md)
 
-详细实验见 [League PPO](https://github.com/Mingjie-Mao/tank-trouble/blob/main/docs/LEAGUE_PPO_2026-10.md) 和 [引擎验证报告](https://github.com/Mingjie-Mao/tank-trouble/blob/main/docs/OWN_ENGINE_2026-10.md)。
+## 目录
 
-## 技术栈
+| 路径 | 内容 |
+|---|---|
+| `tank_trouble_original/` | 游戏和 Laika 的 Python 移植 |
+| `web/` | 浏览器对战；`web/lib/engine/` 为 JS 引擎；`web/rl/` 为 RL 环境、智能体与评测 |
+| `training/js_league_ppo.py` | PPO 训练、评测、蒸馏与导出 |
+| `swf_decompiled/` | 反编译的 Flash 源码 |
 
-Python、PyTorch、PPO、GAE、MPC、JavaScript、TypeScript、React、Web Worker
+技术栈：Python、PyTorch、JavaScript、TypeScript、React、Web Worker。
 
 ## 本地运行
 
-**Python 游戏：** `python3 play_tank_trouble.py`
-
-**浏览器对战：**
-
-1. `cd web`
-2. `npm install`
-3. `npm run dev`
+- Python 游戏：`python3 play_tank_trouble.py`
+- 浏览器对战：`cd web && npm install && npm run dev`

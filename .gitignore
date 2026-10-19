@@ -4,95 +4,28 @@ __pycache__/
 .venv/
 venv/
 
-# 训练产物 (二进制模型 / tensorboard 事件, 队友自行训练生成)
-training/models/*.zip
-training/tb_logs/
-
-# 原始 Flash 素材 (二进制, 反编译源码见 swf_decompiled/)
+# Original Flash assets (binary; the decompiled source is in swf_decompiled/).
 tank-trouble_flash/
-training/distill_data/
-training/models/*.pt
-training/score_data/
-training/value_data/
-training/survival_data/
-training/survival_data_v2/
-training/survival_distillability_data/
-training/survival_replica_530_data/
-training/opportunity_data/
-training/opportunity_data_v2/
 
-# 本地会话恢复档 (个人对话记录, 勿公开)
+# training/ tracks only the league PPO trainer. Checkpoints, logs, teacher
+# labels and evaluation output (training/runs/) and older local datasets stay
+# on the machine.
+training/*
+!training/js_league_ppo.py
+
+# Browser arena run output.
+web/data/
+
+# Personal and machine-local files: session exports, CV, backups, editor and
+# agent configuration.
 restored_session_*.md
-
-# Local experiment artifacts. Keep reproducible source/configuration in Git,
-# but leave machine-specific backups, raw datasets, logs, and bulk run output local.
-local_backups/
-screenlog.*
-training/logs/*.log
-training/logs/*.pid
-training/p26_amortized_data/
-training/analysis/runs/*
-!training/analysis/runs/exact_state_clone_fidelity.json
-!training/analysis/runs/exact_state_fire_cost_official_3x40.json
-!training/analysis/runs/exact_teacher_unseen_3x100.json
-!training/analysis/runs/sparse_exact_safety_3x40_fixed_scheduler.json
-!training/analysis/runs/sparse_exact_safety_narrow_replan_unseen_3x100_stopped_summary.json
-# ---- 2026-08-07 归档补充 ----
-
-# 私人对话导出: 与 restored_session_*.md 同类, 含全部用户原话, 勿公开
-docs/CLAUDE_CODE_COMPLETE_CONTEXT.md
-
-# 第三方可执行文件 / 二进制分发 (他人作品, 非本项目产物)
-*.exe
-# 下载的第三方 wheel, 含 Linux aarch64 的 torch, 约 97MB。
-# 依赖靠 pip 装, 不进仓库。
-wheels/
-
-# 个人文件: 简历与 Word 临时锁文件。与 restored_session_*.md 同类, 勿公开。
 *.docx
 .~*.docx
-
-# 训练/蒸馏数据集 (可由脚本重新生成, 合计约 80MB)
-training/flywheel_value_data/
-training/killfield_p39_data/
-training/killfield_fast_data/
-training/killfield_full_data/
-training/killfield_distill_short/
-training/opponent_space_data/
-training/exploit_paths_backup/
-training/temporal_intent_data/
-
-# 回放与实验产物
-# training/*.npz 只匹配 training/ 直接子文件, 管不到子目录, 故补一条递归规则。
-training/*.npz
-training/**/*.npz
-training/logs/*.log
-
-# 分析产物: 批量运行输出不进仓库, 但文档引用到的报告保留。
-training/analysis/live/
-training/analysis/dagger/*
-!training/analysis/dagger/collect_round1.json
-
-# Browser arena run output. The champion regression set is tracked because the
-# flywheel reads it back; sweep, blind and failure dumps are per-run artefacts
-# that would otherwise add tens of thousands of lines of JSON per experiment.
-web/data/blind/
-web/data/failures/
-web/data/regression/*.json
-!web/data/regression/tactical-champion.json
-
-# Run output under training/analysis/. That directory tracks written analysis
-# (.md) and the scripts that produce it (.py); the JSON dumps and .partial
-# streams are per-run and can be regenerated.
-training/analysis/**/*.json
-training/analysis/**/*.jsonl
-
-# Local editor/agent configuration. Machine-specific and regenerated on demand;
-# it is not part of the product.
+local_backups/
+screenlog.*
 .claude/
-
-# League PPO checkpoints and logs (training/js_league_ppo.py). Per-run output.
-training/runs/
+*.exe
+wheels/
 
 # TypeScript incremental build state.
 web/tsconfig.tsbuildinfo

@@ -8,10 +8,11 @@
   Game.setup_battle()<- frame_53 setupBattle()/setupStandardMaze()/deployTank()
   Game.destroy_tank()<- frame_53 destroyTank()
 
-帧执行顺序 (对应 Flash enterFrame 派发, 按创建顺序):
-  _root 逻辑 -> tank0 -> tank1 -> 子弹(按创建顺序)
-  当帧新建的子弹下一帧才开始移动 (Flash 中 attachMovie 的剪辑
-  在下一次 enterFrame 才收到事件)。
+帧执行顺序 (AVM1: 全局执行列表, 新创建的剪辑插在表头, 即后创建的先执行;
+见 Ruffle core/src/avm1/runtime.rs 的 add_to_exec_list / run_frame):
+  子弹(最新的先) -> tank1(含 Laika 决策) -> tank0 -> _root 逻辑(回合状态机)
+  子弹先于坦克移动并命中判定, 判定用的是坦克上一帧末的位置;
+  当帧新开的子弹在坦克阶段才创建, 下一帧子弹阶段才第一次移动。
 """
 
 import math
@@ -268,12 +269,11 @@ class Bullet:
         self.lifetime = C.BULLETLIFETIME
         self.deadly = C.BULLETDEADLY
         self.removed = False
-        # 枪口出生点本就落在发射者自己的判定框内; 若坦克保持原方向前进,
-        # 子弹与坦克的分离速度被削弱到接近 0, 下一帧命中测试仍判在框内,
-        # 直线追着自己的子弹也会打死自己。豁免发射者直到子弹曾经离开过
-        # 自己的判定框一次 —— 跳弹几乎总是先飞出框外才弹回来, 所以这只
-        # 改变"直线追子弹"这一种场景, 跳弹自杀仍然按原样致命。
-        self.has_exited_owner = False
+        # 原版没有发射者豁免。出膛点 (本地 y=-51.14) 确实在炮管矩形
+        # (y 到 -55) 之内, 但子弹在坦克之前执行: 下一帧它先飞 4.5 像素
+        # 才做命中判定, 早已离开炮管; 贴墙开枪时反弹回车身则照样致命。
+        # 已反弹过与否只是事实记录, 不参与规则。
+        self.has_bounced = False
 
     def update(self):
         g = self.game
@@ -286,6 +286,7 @@ class Bullet:
             self.y += self.y_speed
             if g.wall_hit(self.x, self.y):
                 g.events.append(("bounce", self.name))
+                self.has_bounced = True
                 # X 反转测试 (bullet:31-44)
                 tx = prev_x - self.x_speed
                 ty = prev_y + self.y_speed
@@ -309,12 +310,8 @@ class Bullet:
         # 命中坦克 (bullet:90-104) — 原版无发射者豁免, 可命中自己!
         # 规则开关: self_harm_immune 里的坦克对自己的子弹免疫 (不自伤)。
         if self.deadly == 0:
-            if not self.has_exited_owner and not self.owner.point_in_shape(self.x, self.y):
-                self.has_exited_owner = True
             for i in range(g.tanks_count):
                 tank = g.tanks[i]
-                if tank is self.owner and not self.has_exited_owner:
-                    continue          # 直线追子弹豁免: 子弹还没离开过枪口判定框
                 if tank.alive and tank.point_in_shape(self.x, self.y):
                     if (tank is self.owner
                             and self.owner.number in g.self_harm_immune):
@@ -528,7 +525,6 @@ class Game:
             self._bullet_depth += 1
             name = "bullet%d" % self._bullet_depth
             b = Bullet(self, name, tank, self.scale)
-            b.just_created = True   # 当帧不更新 (Flash: 下一帧才收到 enterFrame)
             self.bullets.append(b)
             tank.bullets_fired += 1
             self.events.append(("fire", tank.number))
@@ -569,9 +565,10 @@ class Game:
     # ---------------------------------------------- 主循环
 
     def step(self):
-        """推进一帧 (1/25 秒), 对应一次 enterFrame 派发。
+        """推进一帧 (1/25 秒), 对应一次 AVM1 帧执行。
 
-        返回本帧事件列表。
+        顺序与原版一致: 后创建的剪辑先执行 —— 子弹(最新的先), 坦克
+        (tank1 先于 tank0), 最后是 _root.onEnterFrame。返回本帧事件列表。
         """
         self.frame += 1
         self.events = []
@@ -581,7 +578,17 @@ class Game:
             if remaining > 0:
                 self.hit_immunity_remaining[i] = remaining - 1
 
-        # ---- _root.onEnterFrame (frame_53:2366-2536) ----
+        # ---- 子弹 enterFrame (最新的先; 本帧坦克阶段新开的子弹还不在表里) ----
+        for b in reversed(list(self.bullets)):
+            if not b.removed:
+                b.update()
+        self.bullets = [b for b in self.bullets if not b.removed]
+
+        # ---- 坦克 enterFrame (后创建的先: tank1 -> tank0) ----
+        for tank in reversed(self.tanks):
+            tank.update()
+
+        # ---- _root.onEnterFrame (frame_53:2366-2536; 根时间轴最早创建, 最后执行) ----
         # tankFields 更新 (2390-2397)
         for i in range(self.tanks_count):
             self.tank_fields[i] = {
@@ -617,20 +624,7 @@ class Game:
         if self.reset_count == 0:
             self.end_count = C.NUMBEROFFRAMESBEFOREEND + C.NUMBEROFFRAMESFROZEN
             self.frozen = False
-            self.setup_battle()
-
-        # ---- 坦克 enterFrame (创建顺序) ----
-        for tank in self.tanks:
-            tank.update()
-
-        # ---- 子弹 enterFrame (创建顺序; 当帧新建的跳过) ----
-        for b in list(self.bullets):
-            if getattr(b, "just_created", False):
-                b.just_created = False
-                continue
-            if not b.removed:
-                b.update()
-        self.bullets = [b for b in self.bullets if not b.removed]
+            self.setup_battle()   # 新坦克在本帧执行表之外, 下一帧才第一次更新
 
         return self.events
 

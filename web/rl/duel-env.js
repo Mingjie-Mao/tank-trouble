@@ -1,17 +1,17 @@
 /**
- * Duel environment for league PPO, on the JS engine the browser champion runs.
+ * Duel environment for league PPO, on this repository's own engine and Laika.
  *
- * A port of KillField's Hybrid environment (`engine/src/duel.rs` and
- * `duel_obs.rs`, schema 24, MIT) onto this repository's own physics and
- * Laika. One episode is one round on a fresh maze, paid once at the end by
- * the round's true result: a kill followed by death to a bullet already in
- * flight is a double death, never a win.
+ * One episode is one round on a fresh maze, paid once at the end by the
+ * round's true result: a kill followed by death to a bullet already in flight
+ * is a double death, never a win. The observation layout builds on
+ * Cichlider/killfield's duel observation (MIT).
  *
  * The observation is "facts about the world, never answers about the
  * decision": maze, both poses and their frame-differenced motion, every live
  * bullet with its wall-only forecast, the current barrel's ballistics, and the
- * nine-move `dodgeSafety` lookahead. Never the seed, the RNG, the opponent's
- * buttons or its goal stack.
+ * nine-move `dodgeSafety` lookahead, and how many frames each side must turn
+ * before it holds a hit. Never the seed, the RNG, the opponent's buttons or its
+ * goal stack.
  */
 
 import * as C from "../lib/engine/constants.js";
@@ -48,15 +48,18 @@ const CHANGE_RATE_DIM = 1;
 export const DODGE_DIM = 9;
 const IDLE_STREAK_DIM = 1;
 const IDLE_STREAK_CAP_FRAMES = 25;
+const FIRST_STRIKE_DIM = 2;
+// Turning in place covers 180 degrees in 18 frames either way.
+const FIRST_STRIKE_MAX_TURNS = 18;
 
 const RAY_OFFSET = MAP_DIM;
 const SELF_OFFSET = RAY_OFFSET + RAY_COUNT;
 const OPPONENT_OFFSET = SELF_OFFSET + SELF_DIM;
 const NAV_OFFSET = OPPONENT_OFFSET + OPPONENT_DIM;
 export const AIM_SELF_OFFSET = NAV_OFFSET + NAV_DIM;
-const AIM_OPPONENT_OFFSET = AIM_SELF_OFFSET + AIM_DIM;
+export const AIM_OPPONENT_OFFSET = AIM_SELF_OFFSET + AIM_DIM;
 export const BULLET_OFFSET = AIM_OPPONENT_OFFSET + AIM_DIM;
-const THREAT_OFFSET = BULLET_OFFSET + BULLET_SLOTS * BULLET_DIM;
+export const THREAT_OFFSET = BULLET_OFFSET + BULLET_SLOTS * BULLET_DIM;
 export const PHASE_OFFSET = THREAT_OFFSET + THREAT_DIM;
 export const LAST_ACTION_OFFSET = PHASE_OFFSET + PHASE_DIM;
 export const SELF_THREAT_COUNT_OFFSET = LAST_ACTION_OFFSET + LAST_ACTION_DIM;
@@ -64,10 +67,14 @@ const OLDER_ACTIONS_OFFSET = SELF_THREAT_COUNT_OFFSET + SELF_THREAT_COUNT_DIM;
 const CHANGE_RATE_OFFSET = OLDER_ACTIONS_OFFSET + OLDER_ACTIONS_DIM;
 export const DODGE_OFFSET = CHANGE_RATE_OFFSET + CHANGE_RATE_DIM;
 const IDLE_STREAK_OFFSET = DODGE_OFFSET + DODGE_DIM;
-export const OBS_DIM = IDLE_STREAK_OFFSET + IDLE_STREAK_DIM; // 1028
+export const FIRST_STRIKE_OFFSET = IDLE_STREAK_OFFSET + IDLE_STREAK_DIM;
+export const OBS_DIM = FIRST_STRIKE_OFFSET + FIRST_STRIKE_DIM; // 1030
 
-// Bumped on any layout or semantic change; checkpoints carry it.
-export const OBS_SCHEMA = "tt-duel-24";
+// Bumped on any layout or semantic change; checkpoints carry it. Schema 25
+// only appended the first-strike pair, so a schema-24 network reads a 25
+// observation unchanged by ignoring its last two values.
+export const OBS_SCHEMA = "tt-duel-25";
+export const PREVIOUS_OBS_SCHEMA = "tt-duel-24";
 
 // ------------------------------------------------------------- normalisers
 
@@ -119,11 +126,11 @@ export function styleBonus(changes, frames) {
     STYLE_MAX * (1.0 - Math.log(rate / STYLE_ANCHOR_RATE) / span)));
 }
 
-export function outcomeReward(outcome, frames) {
+export function outcomeReward(outcome, frames, doubleDeath = REWARD_DOUBLE_DEATH) {
   switch (outcome) {
     case Outcome.WIN: return winReward(frames);
     case Outcome.LOSS: return REWARD_LOSS;
-    case Outcome.DOUBLE_DEATH: return REWARD_DOUBLE_DEATH;
+    case Outcome.DOUBLE_DEATH: return doubleDeath;
     case Outcome.DRAW: return REWARD_DRAW;
     default: return 0.0;
   }
@@ -269,6 +276,87 @@ function aimAssist(game, me, out, offset) {
   out[offset + 4] = clamp(closest / (C.MOVIEWIDTH + C.MOVIEHEIGHT), 0, 1);
 }
 
+/** A still tank's hit shape, with its rotation's sin/cos taken once. */
+function shapeOf(tank) {
+  const th = tank.rotation * C.DEG;
+  // Farthest shape point from the centre: the barrel tip's corners.
+  const reach = tank.displayScale * Math.hypot(C.TANK_BASE_WIDTH / 2, -C.TANK_SHAPE_BARREL_TIP_Y);
+  return { x: tank.x, y: tank.y, c: Math.cos(th), s: Math.sin(th), k: 1 / tank.displayScale,
+    r2: reach * reach };
+}
+
+/** Tank.pointInShape for a shape from shapeOf(). */
+function inShape(f, px, py) {
+  const dx = px - f.x;
+  const dy = py - f.y;
+  if (dx * dx + dy * dy > f.r2) return false;
+  const lx = (dx * f.c + dy * f.s) * f.k;
+  const ly = (-dx * f.s + dy * f.c) * f.k;
+  if (Math.abs(lx) <= C.TANK_BASE_WIDTH / 2 && Math.abs(ly) <= C.TANK_BASE_HEIGHT / 2) return true;
+  return Math.abs(lx) <= C.TANK_SHAPE_BARREL_HALF_WIDTH
+    && C.TANK_SHAPE_BARREL_TIP_Y <= ly && ly <= 0;
+}
+
+/**
+ * Does a shot fired at barrel angle `angle` hit `target` before `shooter`?
+ * The same flight as aimAssist (and Laika's checkBulletPath): a third of a
+ * bullet's life, reflecting off walls, everyone standing still. The shooter's
+ * barrel turns with the angle; its hull does not move.
+ */
+function shotHits(game, shooter, from, target, angle) {
+  const scale = game.scale;
+  const rad = ((angle - 90) * Math.PI) / 180;
+  let x = shooter.x + Math.cos(rad) * scale * 4.5 / 16;
+  let y = shooter.y + Math.sin(rad) * scale * 4.5 / 16;
+  let xs = Math.cos(rad) * C.BULLETSPEED * (scale / 50);
+  let ys = Math.sin(rad) * C.BULLETSPEED * (scale / 50);
+  let life = C.BULLETLIFETIME / 3;
+  while (life > 0) {
+    const prevX = x;
+    const prevY = y;
+    x += xs;
+    y += ys;
+    if (game.wallHit(x, y)) {
+      const hitXInv = game.wallHit(prevX - xs, prevY + ys);
+      const hitYInv = game.wallHit(prevX + xs, prevY - ys);
+      if (hitXInv && !hitYInv) ys = -ys;
+      else if (hitYInv && !hitXInv) xs = -xs;
+      else { xs = -xs; ys = -ys; }
+      x = prevX + xs;
+      y = prevY + ys;
+    }
+    if (inShape(target, x, y)) return true;
+    if (inShape(from, x, y)) return false;
+    life -= 1;
+  }
+  return false;
+}
+
+/**
+ * First strike: the fewest frames `shooter` must turn in place before its
+ * barrel holds a shot that hits `target`, or -1 if none within half a turn.
+ * Comparing the two directions of a duel says who can fire first.
+ */
+export function turnsToHit(game, shooter, target) {
+  if (!shooter.alive || !target.alive) return -1;
+  const goal = shapeOf(target);
+  const at = (rotation) => {
+    const from = shapeOf(shooter);
+    const th = rotation * C.DEG;
+    from.c = Math.cos(th);
+    from.s = Math.sin(th);
+    return shotHits(game, shooter, from, goal, rotation);
+  };
+  const r = shooter.rotation;
+  if (at(r)) return 0;
+  for (let k = 1; k <= FIRST_STRIKE_MAX_TURNS; k++) {
+    const turn = k * C.TANK_TURN_SPEED;
+    if (at(r - turn)) return k;
+    if (k < FIRST_STRIKE_MAX_TURNS && at(r + turn)) return k;
+  }
+  return -1;
+}
+
 /** Wall segments inflated by the half thickness, as `reflectiveClosest` wants. */
 export function inflatedBoxes(game) {
   const t = game.wallHalfT;
@@ -297,9 +385,8 @@ function nothingCanReach(game, meIndex, out, offset) {
  * the round clock — evolves the same way whichever move I hold. It is rolled
  * once with my tank taken out of play, recording each frame's hit-test
  * points and surviving bullets; each move then simulates only its own hull
- * against that record. The one thing that does depend on my motion is when
- * my own bullets first leave my hull — they cannot hit me before — so each
- * move tracks that itself.
+ * against that record. Bullets run before tanks, so each frame's hit tests
+ * meet my hull where the previous frame left it, and only then does it move.
  */
 export function dodgeSafety(game, meIndex, out, offset, horizon = DODGE_HORIZON) {
   if (nothingCanReach(game, meIndex, out, offset)) return;
@@ -313,21 +400,20 @@ export function dodgeSafety(game, meIndex, out, offset, horizon = DODGE_HORIZON)
   const world = makeSandbox(view, "L1", 0);
   const ghost = world.tanks[0];
   ghost.alive = false; // no motion, no hit tests, aliveCount untouched
-  // My bullets, by name, and whether each has already left my hull.
-  const exitedAtStart = new Map();
-  for (const b of world.bullets) if (b.owner === ghost) exitedAtStart.set(b.name, b.hasExitedOwner);
   const frames = [];
   for (let f = 0; f < horizon; f++) {
+    // The freeze is set by the round logic at the end of a frame, so it
+    // decides whether bullets and tanks run on the next one.
+    const frozen = world.frozen;
     const updating = [];
-    for (const b of world.bullets) if (!b.removed && !b.justCreated) updating.push(b);
+    for (const b of world.bullets) if (!b.removed) updating.push(b);
     const events = world.step();
-    const frozen = world.frozen; // set before anything moves, never cleared mid-round
-    // Each bullet's hit-test point this frame, in update order, and whose it is.
+    // Each bullet's hit-test point this frame, in update order.
     const hits = [];
-    if (!frozen) for (const b of updating) hits.push({ x: b.x, y: b.y, mine: b.owner === ghost ? b.name : null });
+    if (!frozen) for (const b of updating) hits.push(b.x, b.y);
     const clear = [];
     for (const b of world.bullets) clear.push(b.x, b.y);
-    let ended = frozen;
+    let ended = world.frozen;
     for (const e of events) if (e[0] === "round_end") ended = true;
     frames.push({ frozen, hits, clear, ended });
     if (ended) break;
@@ -355,20 +441,14 @@ export function dodgeSafety(game, meIndex, out, offset, horizon = DODGE_HORIZON)
     me.fire = false;
     let minClearance = 8.0;
     let value = null;
-    const exited = new Map(exitedAtStart);
     for (let f = 0; f < frames.length; f++) {
       const frame = frames[f];
-      if (!frame.frozen) me.update();
-      for (const hit of frame.hits) {
-        const inside = me.pointInShape(hit.x, hit.y);
-        if (hit.mine !== null && !exited.get(hit.mine)) {
-          // The engine's exemption: harmless to me until it has been outside me once.
-          if (!inside) exited.set(hit.mine, true);
-          continue;
-        }
-        if (inside) { value = -1.0 + 0.5 * (f / horizon); break; }
+      const hits = frame.hits;
+      for (let i = 0; i < hits.length; i += 2) {
+        if (me.pointInShape(hits[i], hits[i + 1])) { value = -1.0 + 0.5 * (f / horizon); break; }
       }
       if (value !== null) break;
+      if (!frame.frozen) me.update();
       const clear = frame.clear;
       for (let i = 0; i < clear.length; i += 2) {
         const d = Math.hypot(clear[i] - me.x, clear[i + 1] - me.y) * inv;
@@ -552,13 +632,13 @@ export function encodeObservation(game, meIndex, prevPose, boxes, history, frame
     v[base + 2] = clamp(vx / speedScale, -1, 1);
     v[base + 3] = clamp(vy / speedScale, -1, 1);
     v[base + 4] = mine ? 1 : 0;
-    // Whether it can hit its owner yet: the engine exempts the shooter until
-    // the bullet has been outside the shooter's hull once.
-    v[base + 5] = bullet.hasExitedOwner ? 1 : 0;
+    v[base + 5] = bullet.hasBounced ? 1 : 0;
     v[base + 6] = clamp(bullet.lifetime / C.BULLETLIFETIME, 0, 1);
     const speed = Math.hypot(bullet.xSpeed, bullet.ySpeed);
     if (speed > 1e-9) {
-      if (!(mine && !bullet.hasExitedOwner)) {
+      // An unbounced shot of mine flies straight away from me and the forecast
+      // assumes I hold still, so it is not a threat to me.
+      if (!(mine && !bullet.hasBounced)) {
         const approach = reflectiveClosest(
           bullet.x, bullet.y, bullet.xSpeed / speed, bullet.ySpeed / speed, speed,
           FORECAST_FRAMES, FORECAST_BOUNCES, boxes, me.x, me.y);
@@ -573,7 +653,7 @@ export function encodeObservation(game, meIndex, prevPose, boxes, history, frame
       } else {
         v[base + 9] = 1.0;
       }
-      if (!(!mine && !bullet.hasExitedOwner) && them.alive) {
+      if (!(!mine && !bullet.hasBounced) && them.alive) {
         const approach = reflectiveClosest(
           bullet.x, bullet.y, bullet.xSpeed / speed, bullet.ySpeed / speed, speed,
           FORECAST_FRAMES, FORECAST_BOUNCES, boxes, them.x, them.y);
@@ -616,7 +696,11 @@ export function encodeObservation(game, meIndex, prevPose, boxes, history, frame
   dodgeSafety(game, meIndex, v, o + DODGE_OFFSET);
   v[o + IDLE_STREAK_OFFSET] = Math.min(history.idleStreak, IDLE_STREAK_CAP_FRAMES)
     / IDLE_STREAK_CAP_FRAMES;
+  v[o + FIRST_STRIKE_OFFSET] = firstStrikeFeature(turnsToHit(game, me, them));
+  v[o + FIRST_STRIKE_OFFSET + 1] = firstStrikeFeature(turnsToHit(game, them, me));
 }
+
+const firstStrikeFeature = (turns) => (turns < 0 ? 1 : turns / (FIRST_STRIKE_MAX_TURNS + 1));
 
 // -------------------------------------------------------------- opponents
 
@@ -641,13 +725,15 @@ function poses(game) {
  * opponent's action is supplied to `step()` by the caller each frame.
  */
 export class DuelEpisode {
-  constructor(seed, opponent, { wallSliding = false } = {}) {
+  constructor(seed, opponent, { doubleDeathReward = REWARD_DOUBLE_DEATH } = {}) {
     this.seed = seed >>> 0;
     this.opponent = opponent;
+    // What a mutual kill pays. The default keeps it just below zero; the true
+    // win metric counts it as a non-win, so a run can price it closer to a loss.
+    this.doubleDeathReward = doubleDeathReward;
     this.game = new Game({
       seed: this.seed,
       aiFactory: opponent === OpponentKind.LAIKA ? (g, t) => new LaikaAI(g, t) : null,
-      wallSliding,
     });
     this.agent = null;
     if (opponent === OpponentKind.TACTICAL) {
@@ -725,7 +811,7 @@ export class DuelEpisode {
       this.outcome = Outcome.DRAW;
     }
     if (this.outcome === Outcome.RUNNING) return 0.0;
-    return outcomeReward(this.outcome, this.frames)
+    return outcomeReward(this.outcome, this.frames, this.doubleDeathReward)
       + styleBonus(this.history[0].changes, this.frames);
   }
 }

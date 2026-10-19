@@ -114,8 +114,9 @@ TANK_BARREL_HALF_WIDTH = TANK_TURRET_WIDTH / 6.0        # 7.5
 TANK_BARREL_TIP_Y = -TANK_TURRET_HEIGHT / 16.0 * 11.0   # -53.28125
 
 # 命中判定形状用 (点 vs 坦克图形, hitTest(x,y,true)):
-# 炮管矢量图形: 尖端 y=-55, 宽约 17 (像素实测), 圆顶半径约 23.5 (含在 base 矩形内)
-TANK_SHAPE_BARREL_HALF_WIDTH = 8.5
+# 炮管矢量图形 (SWF shape 80/82, 炮塔 sprite134 第 1 帧): 矩形 x∈[-7.5, 7.5],
+# y∈[-55, -21.25] (另有 0.05 发丝描边); 圆顶含在 base 矩形内
+TANK_SHAPE_BARREL_HALF_WIDTH = 7.5
 TANK_SHAPE_BARREL_TIP_Y = -55.0
 
 # 子弹图形半径 (sprite175 内 shape167 边界 ±3.5, 渲染用)

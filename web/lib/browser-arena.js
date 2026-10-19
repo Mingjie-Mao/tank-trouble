@@ -2,21 +2,12 @@ import { Game } from "./engine/game.js";
 import { LaikaAI } from "./engine/laika.js";
 import { Rng } from "./engine/rng.js";
 import { BULLET_VISUAL_RADIUS, FPS } from "./engine/constants.js";
-import { KillFieldAgent } from "./killfield-runtime/src/killfield/teacher.js";
 import { mirrorView } from "./killfield-runtime/src/killfield/mirror.js";
-import { SaferSearchAgent } from "./safer-search-agent.js";
-import { ConsensusSafetyAgent } from "./consensus-safety-agent.js";
-import { TwoStageSearchAgent } from "./two-stage-search-agent.js";
-import { ShadowCorrectionAgent } from "./shadow-correction-agent.js";
-import { TacticalSafetyAgent } from "./tactical-safety-agent.js";
 import { TacticalCandidateAgent } from "./tactical-candidate-agent.js";
-import { TacticalPlanAgent } from "./tactical-plan-agent.js";
-import { VisibleOpponentModel } from "./visible-opponent-model.js";
-import { SearchTeacherRecorder } from "./search-teacher-recorder.js";
-import { LearnedPriorTacticalAgent } from "./learned-prior-tactical-agent.js";
 import { DodgerJsAgent, LaikaJsAgent } from "./scripted-opponents.js";
 import { PpoLeagueAgent } from "../rl/ppo-agent.js";
-import { PpoDeepShieldAgent, PpoPriorTacticalAgent } from "../rl/ppo-hybrid.js";
+import { PpoMpcAgent } from "../rl/ppo-mpc.js";
+import { visionFor } from "../rl/vision.js";
 
 const EMPTY = Object.freeze({
   forward: false,
@@ -40,19 +31,12 @@ export function policyUsesWallSliding() {
 }
 
 const POLICIES = [
-  { value: "p27-js-tactical-v3", label: "Tactical Smooth（当前冠军）" },
-  { value: "p27-js-tactical-v3-b12", label: "Tactical Smooth + 12ms 预算收窄" },
-  { value: "p27-js-tactical-v3-prior-k6", label: "Tactical Smooth + 学习先验 K6" },
-  { value: "p27-js-tactical-v3-prior-k4", label: "Tactical Smooth + 学习先验 K4" },
-  { value: "p27-js-tactical-v2", label: "Tactical（冻结前任）" },
-  { value: "p27-js-tactical", label: "Tactical Legacy（冻结基线）" },
-  { value: "ppo-league", label: "League PPO（实验 · 纯网络联赛自博弈）" },
-  { value: "killfield-js", label: "KillField JS（第三方速度基线）" },
-  { value: "laika-js", label: "Laika（官方脚本）" },
-  { value: "hunter-js", label: "Hunter JS（强追击）" },
-  { value: "dodger-js", label: "Dodger JS（强规避）" },
-  { value: "random-js", label: "Random JS" },
-  { value: "idle-js", label: "Idle JS" },
+  { value: "ppo-league", label: "League PPO（强化学习）" },
+  { value: "p27-js-tactical-v2", label: "Tactical（MPC 搜索）" },
+  { value: "laika-js", label: "Laika（原版 AI）" },
+  { value: "hunter-js", label: "Hunter（强追击）" },
+  { value: "dodger-js", label: "Dodger（强规避）" },
+  { value: "random-js", label: "Random（随机）" },
 ];
 
 function controls(value = EMPTY) {
@@ -118,77 +102,8 @@ class RandomJsAgent {
   }
 }
 
-class IdleJsAgent {
-  constructor() {
-    this.lastDecisionKind = "idle";
-  }
-
-  reset() {}
-
-  drive(game) {
-    applyControls(game.tanks[0], EMPTY);
-  }
-
-  telemetry() {
-    return { decision: "idle", planMedianMs: 0, planP95Ms: 0 };
-  }
-}
-
 export function makeAgent(name, seed, opponentModel) {
-  if (name === "p27-js-tactical-v2-recorder") {
-    return new SearchTeacherRecorder({ seed, oppModel: opponentModel });
-  }
-  // The promoted champion: frozen Tactical plus K4 wall-contact physics
-  // (enabled on the arena, not here) and K1 fire continuation.
-  if (name === "p27-js-tactical-v3") {
-    return new TacticalCandidateAgent({
-      seed,
-      oppModel: opponentModel,
-      enableShotSettlementAudit: true,
-      fireContinuation: true,
-    });
-  }
-  // The champion with budget-triggered narrowing on the evasion search. The
-  // browser calibration showed the champion runs at a 75.3 ms rolling p95
-  // against a 40 ms budget, so the gate it was promoted under does not hold
-  // there. Unlike a fixed breadth cut this keeps the full 9x9 search whenever
-  // the frame can afford it. The budget is wall-clock, so this policy is
-  // deliberately non-deterministic and must not be used for paired seed
-  // evaluation — see BROWSER_LATENCY_CALIBRATION_2026-08-28.md.
-  if (/^p27-js-tactical-v3-b\d+$/.test(name)) {
-    return new TacticalCandidateAgent({
-      seed,
-      oppModel: opponentModel,
-      enableShotSettlementAudit: true,
-      fireContinuation: true,
-      evasionBudgetMs: Number(name.slice(name.lastIndexOf("-b") + 2)),
-    });
-  }
-  // Phase 3 of the adoption plan: the champion plus the visible-state opponent
-  // model. The privileged ablation showed K4+K1 is worth +1.67pp when the
-  // opponent's plan is known and -0.10pp when it is not, so the remaining
-  // headroom sits in opponent prediction rather than in search or physics.
-  if (name === "p27-js-tactical-v3-om") {
-    return new TacticalCandidateAgent({
-      seed,
-      oppModel: opponentModel,
-      enableShotSettlementAudit: true,
-      fireContinuation: true,
-      opponentBehavior: new VisibleOpponentModel(),
-    });
-  }
-  // Latency-tail candidates: the evasion search expands only its widest N
-  // surviving roots instead of all nine.
-  const breadthMatch = /^p27-js-tactical-v3-b(\d+)$/.exec(name);
-  if (breadthMatch) {
-    return new TacticalCandidateAgent({
-      seed,
-      oppModel: opponentModel,
-      enableShotSettlementAudit: true,
-      fireContinuation: true,
-      evasionRootBreadth: Number(breadthMatch[1]),
-    });
-  }
+  // Tactical: real-time MPC search over the engine.
   if (name === "p27-js-tactical-v2") {
     return new TacticalCandidateAgent({
       seed,
@@ -196,182 +111,44 @@ export function makeAgent(name, seed, opponentModel) {
       enableShotSettlementAudit: true,
     });
   }
-  // Phase 2A commitment sweep: the champion with a shortened move commitment.
-  // Only meaningful alongside K4 wall sliding, which is set on the arena.
-  // The `-wr` suffix additionally lets a resolved wall contact break
-  // commitment, restoring the selective replan trigger K4 removed.
-  // `-wr` lets a resolved wall contact break commitment; `-fc` searches the 18
-  // fire-continuation plans and stops forcing verified shots.
-  const commitMatch = /^p27-js-tactical-v2-c(\d+)(-wr)?(-fc)?$/.exec(name);
-  if (commitMatch) {
+  // Tactical with a wall-clock budget on its evasion search, as the league
+  // PPO trainer runs it (12 ms). Non-deterministic by design; not in the UI.
+  if (/^p27-js-tactical-v2-b\d+$/.test(name)) {
     return new TacticalCandidateAgent({
       seed,
       oppModel: opponentModel,
       enableShotSettlementAudit: true,
-      commitMoveFrames: Number(commitMatch[1]),
-      wallContactReplan: Boolean(commitMatch[2]),
-      fireContinuation: Boolean(commitMatch[3]),
+      evasionBudgetMs: Number(name.slice(name.lastIndexOf("-b") + 2)),
     });
   }
-  // Privileged variant: the rollout keeps the live rng stream and Laika's real
-  // goal stack. Not deployable and not fair play — it measures how much of the
-  // remaining gap to the exact-state teacher is missing information rather than
-  // weaker search.
-  const privMatch = /^p27-js-tactical-v2-priv(-fc)?$/.exec(name);
-  if (privMatch) {
-    return new TacticalCandidateAgent({
-      seed,
-      oppModel: "L3",
-      enableShotSettlementAudit: true,
-      fireContinuation: Boolean(privMatch[1]),
-    });
-  }
-  if (name === "p27-js-tactical-plan") {
-    return new TacticalPlanAgent({ seed, oppModel: opponentModel });
-  }
-  const safetyV2Match = /^p27-js-tactical-safety-v2(?:-h(\d+))?$/.exec(name);
-  if (safetyV2Match) {
-    return new TacticalCandidateAgent({
-      seed,
-      oppModel: opponentModel,
-      enableShotSettlementAudit: true,
-      enableLastChanceSafety: true,
-      lastChanceHorizon: Number(safetyV2Match[1] ?? 16),
-    });
-  }
-  const fireSafetyMatch = /^p27-js-tactical-fire-shield(?:-h(\d+))?$/.exec(name);
-  if (fireSafetyMatch) {
-    return new TacticalCandidateAgent({
-      seed,
-      oppModel: opponentModel,
-      enableShotSettlementAudit: true,
-      enableLastChanceSafety: true,
-      lastChanceMode: "fire",
-      lastChanceHorizon: Number(fireSafetyMatch[1] ?? 10),
-    });
-  }
-  if (name === "p27-js-tactical-anti-stall") {
-    return new TacticalCandidateAgent({
-      seed,
-      oppModel: opponentModel,
-      enableShotSettlementAudit: true,
-      enableSafeStallChase: true,
-    });
-  }
-  const doubleDeathMatch = /^p27-js-tactical-dd-safe(?:-m(\d+))?$/.exec(name);
-  if (doubleDeathMatch) {
-    return new TacticalCandidateAgent({
-      seed,
-      oppModel: opponentModel,
-      enableShotSettlementAudit: true,
-      maximumUnsafeAuditsPerRound: Number(doubleDeathMatch[1] ?? 4),
-    });
-  }
-  if (name === "p27-js-tactical-opponent-model") {
-    return new TacticalCandidateAgent({
-      seed,
-      oppModel: opponentModel,
-      opponentBehavior: new VisibleOpponentModel(),
-    });
-  }
-  if (name === "p27-js-tactical-combined") {
-    return new TacticalCandidateAgent({
-      seed,
-      oppModel: opponentModel,
-      enableShotSettlementAudit: true,
-      opponentBehavior: new VisibleOpponentModel(),
-    });
-  }
-  // The champion with the learned action prior narrowing the plan list. Same
-  // options as `p27-js-tactical-v3` so the only difference under test is the
-  // pruning; the `-v3-` prefix also gives it the champion's wall physics.
-  const learnedPriorMatch = /^p27-js-tactical-v3-prior-k(\d+)$/.exec(name);
-  if (learnedPriorMatch) {
-    return new LearnedPriorTacticalAgent({
-      seed,
-      oppModel: opponentModel,
-      enableShotSettlementAudit: true,
-      fireContinuation: true,
-      priorTopK: Number(learnedPriorMatch[1]),
-    });
-  }
-  if (name === "p27-js-tactical") {
-    return new TacticalSafetyAgent({ seed, oppModel: opponentModel });
-  }
-  if (name === "p27-js-shadow") {
-    return new ShadowCorrectionAgent({ seed, oppModel: opponentModel });
-  }
-  const twoStageMatch = /^p27-js-two-stage(?:-m(\d+))?$/.exec(name);
-  if (twoStageMatch) {
-    return new TwoStageSearchAgent({
-      seed,
-      oppModel: opponentModel,
-      marginThreshold: Number(twoStageMatch[1] ?? 30),
-    });
-  }
-  if (name === "p27-js-consensus") {
-    return new ConsensusSafetyAgent({ seed, oppModel: opponentModel });
-  }
-  if (name === "p27-js-shield") {
-    return new SaferSearchAgent({ seed, oppModel: opponentModel });
-  }
-  const horizonMatch = /^killfield-h(\d+)-js$/.exec(name);
-  if (horizonMatch) {
-    return new KillFieldAgent({
-      seed,
-      oppModel: opponentModel,
-      horizon: Number(horizonMatch[1]),
-    });
-  }
-  if (name === "killfield-js") {
-    return new KillFieldAgent({ seed, oppModel: opponentModel });
-  }
-  // League PPO (training/js_league_ppo.py): a pure network, no search. It was
-  // trained under the original collision model, which policyUsesWallSliding()
-  // leaves in place for it.
+  // League PPO (training/js_league_ppo.py): one network forward pass per
+  // frame with the move/fire safety shield, no search.
   if (name === "ppo-league") return new PpoLeagueAgent({ seed });
-  // Search hybrids over the same network (rl/ppo-hybrid.js). Experimental and
-  // not in the UI list; graded with rl/eval-agent.mjs.
-  const ppoPriorMatch = /^ppo-tactical-k(\d+)$/.exec(name);
-  if (ppoPriorMatch) {
-    return new PpoPriorTacticalAgent({
+  // PPO-MPC (rl/ppo-mpc.js): offline teacher for distillation, too slow for
+  // real time and not in the UI list; graded with rl/eval-agent.mjs.
+  const mpcMatch = /^ppo-mpc(?:-k(\d+))?(?:-m(\d+))?(?:-h(\d+))?$/.exec(name);
+  if (mpcMatch) {
+    return new PpoMpcAgent({
       seed,
-      oppModel: opponentModel,
-      enableShotSettlementAudit: true,
-      priorTopK: Number(ppoPriorMatch[1]),
-    });
-  }
-  const deepShieldMatch = /^ppo-deep-shield(?:-h(\d+))?(?:-v(\d+))?$/.exec(name);
-  if (deepShieldMatch) {
-    return new PpoDeepShieldAgent({
-      seed,
-      horizon: Number(deepShieldMatch[1] ?? 24),
-      vetoWithin: deepShieldMatch[2] === undefined ? null : Number(deepShieldMatch[2]),
+      candidates: Number(mpcMatch[1] ?? 4),
+      rollouts: Number(mpcMatch[2] ?? 4),
+      horizon: Number(mpcMatch[3] ?? 32),
     });
   }
   if (name === "laika-js") return new LaikaJsAgent();
   if (name === "hunter-js") return new LaikaJsAgent({ profile: "hunter" });
   if (name === "dodger-js") return new DodgerJsAgent();
   if (name === "random-js") return new RandomJsAgent(seed);
-  if (name === "idle-js") return new IdleJsAgent();
   throw new Error(`unknown browser policy: ${name}`);
 }
 
 function label(name) {
   if (name === "human") return "你";
   if (name === "laika-js") return "Laika";
-  if (name === "hunter-js") return "Hunter JS";
-  if (name === "dodger-js") return "Dodger JS";
-  if (name === "p27-js-shield") return "JS Safety prototype（未晋级）";
-  if (name === "p27-js-tactical") return "Tactical Legacy";
-  if (name === "p27-js-tactical-v3") return "Tactical Smooth";
+  if (name === "hunter-js") return "Hunter";
+  if (name === "dodger-js") return "Dodger";
+  if (name === "ppo-league") return "League PPO";
   if (name === "p27-js-tactical-v2") return "Tactical";
-  if (name === "p27-js-tactical-plan") return "Tactical Plan（隐藏候选）";
-  if (name === "p27-js-tactical-safety-v2") return "Tactical Safety v2（隐藏候选）";
-  if (name === "p27-js-consensus") return "JS Consensus Safety（候选）";
-  if (name.startsWith("p27-js-two-stage")) return "JS Two-stage Search（候选）";
-  const horizonMatch = /^killfield-h(\d+)-js$/.exec(name);
-  if (horizonMatch) return `Deep Search H${horizonMatch[1]} JS（实验）`;
   return POLICIES.find((policy) => policy.value === name)?.label ?? name;
 }
 
@@ -388,7 +165,7 @@ function percentile(values, q) {
 export class BrowserArena {
   constructor({ seed = 970000, wallSliding = null } = {}) {
     this.mode = "watch";
-    this.leftPolicy = "p27-js-tactical-v3";
+    this.leftPolicy = "ppo-league";
     this.rightPolicy = "laika-js";
     this.seed = Number(seed) >>> 0;
     // K4 wall-contact physics, applied to the whole world (both tanks and every
@@ -399,6 +176,7 @@ export class BrowserArena {
       ? null : Boolean(wallSliding);
     this.wallSliding = this.wallSlidingOverride ?? false;
     this.paused = false;
+    this.visionEnabled = false;
     this.humanControls = controls();
     this.streak = 0;
     this.bestStreak = 0;
@@ -532,14 +310,14 @@ export class BrowserArena {
       }
       this.mode = nextMode;
       if (nextMode === "watch") {
-        this.leftPolicy = payload.left_policy ?? "p27-js-tactical-v3";
+        this.leftPolicy = payload.left_policy ?? "ppo-league";
         this.rightPolicy = "laika-js";
       } else if (nextMode === "play") {
         this.leftPolicy = "human";
-        this.rightPolicy = payload.right_policy ?? "p27-js-tactical-v3";
+        this.rightPolicy = payload.right_policy ?? "ppo-league";
       } else {
-        this.leftPolicy = payload.left_policy ?? "p27-js-tactical-v3";
-        this.rightPolicy = payload.right_policy ?? "p27-js-tactical-v3";
+        this.leftPolicy = payload.left_policy ?? "ppo-league";
+        this.rightPolicy = payload.right_policy ?? "ppo-league";
       }
       this._configureControllers();
     } else if (action === "new_maze") {
@@ -555,6 +333,8 @@ export class BrowserArena {
       this.bestStreak = 0;
     } else if (action === "pause") {
       this.paused = Boolean(payload.paused ?? !this.paused);
+    } else if (action === "vision") {
+      this.visionEnabled = Boolean(payload.enabled);
     } else {
       throw new Error(`unknown action: ${action}`);
     }
@@ -602,6 +382,7 @@ export class BrowserArena {
         bullets_fired: tank.bulletsFired,
       })),
       bullets: this.game.bullets.map((bullet) => ({
+        id: bullet.name,
         x: bullet.x,
         y: bullet.y,
         owner: bullet.owner.number,
@@ -627,6 +408,8 @@ export class BrowserArena {
         last_reason: this.mode === "play" ? "human input" : this.lastReason,
       },
       available_policies: POLICIES,
+      // Tank 0's view, computed only while the arena's AI view is on.
+      vision: this.visionEnabled && this.mode !== "play" ? visionFor(this.game, this.leftAgent) : null,
     };
   }
 }

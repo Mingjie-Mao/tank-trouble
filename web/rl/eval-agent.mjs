@@ -3,7 +3,7 @@
  * Grade any browser policy against Laika under the league-PPO protocol, so
  * search and network agents are compared on identical terms.
  *
- *   node rl/eval-agent.mjs <policy> <seedStart> <count> [threads] [--wall-sliding] [--out file]
+ *   node rl/eval-agent.mjs <policy> <seedStart> <count> [threads] [--out file]
  *
  * One round per seed (seed, seed+1, ...), the same maze and spawns
  * `training/js_league_ppo.py eval` uses for that seed; the policy drives tank
@@ -18,7 +18,7 @@ import { Worker, isMainThread, parentPort, workerData } from "node:worker_thread
 
 const OUTCOMES = ["running", "win", "loss", "double", "draw"];
 
-async function playSeeds({ policy, seeds, wallSliding }) {
+async function playSeeds({ policy, seeds }) {
   const { DuelEpisode, OpponentKind } = await import("./duel-env.js");
   const { makeAgent } = await import("../lib/browser-arena.js");
   if (policy.startsWith("ppo-")) {
@@ -27,7 +27,7 @@ async function playSeeds({ policy, seeds, wallSliding }) {
   }
   const rows = [];
   for (const seed of seeds) {
-    const ep = new DuelEpisode(seed, OpponentKind.LAIKA, { wallSliding });
+    const ep = new DuelEpisode(seed, OpponentKind.LAIKA);
     // The arena builds a fresh agent per round with seed + 101 and, against
     // native Laika, the L2 opponent model; mirror that exactly.
     const agent = makeAgent(policy, seed + 101, "L2");
@@ -55,10 +55,9 @@ if (!isMainThread) {
   const args = process.argv.slice(2);
   const outAt = args.indexOf("--out");
   const out = outAt >= 0 ? args.splice(outAt, 2)[1] : null;
-  const wallSliding = args.includes("--wall-sliding");
-  const [policy, seedStart, count, threads] = args.filter((a) => a !== "--wall-sliding");
+  const [policy, seedStart, count, threads] = args;
   if (!policy || !seedStart || !count) {
-    console.error("usage: eval-agent.mjs <policy> <seedStart> <count> [threads] [--wall-sliding] [--out file]");
+    console.error("usage: eval-agent.mjs <policy> <seedStart> <count> [threads] [--out file]");
     process.exit(2);
   }
   const n = Number(count);
@@ -67,7 +66,7 @@ if (!isMainThread) {
   const started = Date.now();
   const parts = await Promise.all(Array.from({ length: k }, (_, t) => new Promise((resolve, reject) => {
     const worker = new Worker(new URL(import.meta.url), {
-      workerData: { policy, seeds: seeds.filter((_, i) => i % k === t), wallSliding },
+      workerData: { policy, seeds: seeds.filter((_, i) => i % k === t) },
     });
     worker.once("message", resolve);
     worker.once("error", reject);
@@ -79,7 +78,7 @@ if (!isMainThread) {
   const se = Math.sqrt(p * (1 - p) / rows.length);
   const perRound = (key) => rows.map((r) => r[key]).sort((a, b) => a - b)[rows.length >> 1];
   const summary = {
-    policy, seedStart: Number(seedStart), games: rows.length, wallSliding, ...tally,
+    policy, seedStart: Number(seedStart), games: rows.length, ...tally,
     winRate: p, ci95: [p - 1.96 * se, p + 1.96 * se],
     meanFrames: rows.reduce((s, r) => s + r.frames, 0) / rows.length,
     medianRoundP50Ms: perRound("p50"), medianRoundP95Ms: perRound("p95"),

@@ -1,12 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { type Language, setLanguage, useLanguage } from "./language";
 import BrowserArenaWorker from "../workers/browser-arena.worker.js?worker";
-import { CHAMPION_BASELINE } from "../lib/champion-baseline.js";
 
 type Mode = "watch" | "play" | "selfplay";
-type RuntimeKind = "browser" | "python";
-type Language = "zh" | "en";
 type Controls = {
   forward: boolean;
   backup: boolean;
@@ -46,7 +44,7 @@ type ArenaState = {
   left_label: string;
   right_label: string;
   tanks: Tank[];
-  bullets: { x: number; y: number; owner: number; lifetime: number }[];
+  bullets: { id: string; x: number; y: number; owner: number; lifetime: number }[];
   runtime: {
     step_ms: number;
     left_decision_ms: number;
@@ -67,30 +65,15 @@ type ArenaState = {
     last_reason: string;
   };
   available_policies: { value: string; label: string }[];
+  vision?: Vision | null;
 };
-type LeagueSummary = {
-  games: number;
-  win: number;
-  loss: number;
-  double_death: number;
-  draw: number;
-  winRate: number;
-  colorGap: number;
-  p95DecisionMs: number;
+type Vision = {
+  dodge: boolean[];
+  shot: { points: number[][]; hit: "opponent" | "self" | "none" };
+  threats: string[];
+  actions?: [number, number, number, number][];
+  shieldVetoed?: boolean;
 };
-type LeagueReport = {
-  generatedAt: string;
-  candidate: string;
-  roundsPerSide: number;
-  overall: LeagueSummary;
-  opponents: Record<string, LeagueSummary>;
-};
-
-const API = "http://127.0.0.1:8766/api";
-const LANGUAGE_STORAGE_KEY = "tank-trouble-language";
-const LANGUAGE_EVENT = "tank-trouble-language-change";
-const PYTHON_RESEARCH_ENABLED =
-  process.env.NEXT_PUBLIC_ENABLE_PYTHON_RESEARCH === "1";
 const EMPTY: Controls = {
   forward: false,
   backup: false,
@@ -99,30 +82,6 @@ const EMPTY: Controls = {
   fire: false,
 };
 
-function languageSnapshot(): Language {
-  const saved = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
-  if (saved === "zh" || saved === "en") return saved;
-  return window.navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
-}
-
-function subscribeLanguage(callback: () => void) {
-  window.addEventListener(LANGUAGE_EVENT, callback);
-  window.addEventListener("storage", callback);
-  return () => {
-    window.removeEventListener(LANGUAGE_EVENT, callback);
-    window.removeEventListener("storage", callback);
-  };
-}
-
-async function command(payload: Record<string, unknown>) {
-  const response = await fetch(`${API}/command`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) throw new Error(`command failed: ${response.status}`);
-  return response.json();
-}
 
 function drawTank(
   ctx: CanvasRenderingContext2D,
@@ -191,63 +150,204 @@ function paletteFor(state: ArenaState, index: number) {
   return index === 0 ? RED_PALETTE : BLACK_PALETTE;
 }
 
-function MazeCanvas({ state, language }: { state: ArenaState | null; language: Language }) {
+/** The last two physics frames from the worker, and when the newer arrived. */
+type Frames = { prev: ArenaState | null; curr: ArenaState | null; at: number };
+
+const PHYSICS_FRAME_MS = 1000 / 25;
+
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t;
+}
+
+/** Interpolate headings the short way round. */
+function lerpAngle(a: number, b: number, t: number) {
+  const delta = ((((b - a) % 360) + 540) % 360) - 180;
+  return a + delta * t;
+}
+
+/** Same maze and round: safe to interpolate between the two frames. */
+function continuous(prev: ArenaState, curr: ArenaState) {
+  return prev.seed === curr.seed && prev.round === curr.round
+    && prev.walls.length === curr.walls.length;
+}
+
+const THROTTLE_ZH = ["后退", "", "前进"];
+const THROTTLE_EN = ["back", "", "forward"];
+const TURN_ZH = ["左转", "", "右转"];
+const TURN_EN = ["left", "", "right"];
+
+function actionName([throttle, turn, fire]: number[], zh: boolean) {
+  const parts = [(zh ? THROTTLE_ZH : THROTTLE_EN)[throttle], (zh ? TURN_ZH : TURN_EN)[turn]]
+    .filter(Boolean);
+  if (fire) parts.push(zh ? "开火" : "fire");
+  return parts.length ? parts.join(zh ? " · " : " + ") : (zh ? "不动" : "hold");
+}
+
+/** The AI view: shot path, threats, nine-move safety grid and the policy's choice. */
+function drawVision(
+  ctx: CanvasRenderingContext2D, vision: Vision, state: ArenaState, tankX: number, tankY: number,
+  unit: number, left: number, top: number, zh: boolean, height: number,
+) {
+  const sx = (x: number) => left + x * unit;
+  const sy = (y: number) => top + y * unit;
+
+  const { points, hit } = vision.shot;
+  ctx.save();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = hit === "opponent" ? "#2e8f75" : hit === "self" ? "#d0453a" : "rgba(80, 86, 96, .55)";
+  if (hit === "none") ctx.setLineDash([6, 5]);
+  ctx.beginPath();
+  points.forEach(([x, y], i) => (i ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y))));
+  ctx.stroke();
+  ctx.restore();
+
+  const threatened = new Set(vision.threats);
+  ctx.save();
+  ctx.strokeStyle = "#d0453a";
+  ctx.lineWidth = 2;
+  for (const bullet of state.bullets) {
+    if (!threatened.has(bullet.id)) continue;
+    ctx.beginPath();
+    ctx.arc(sx(bullet.x), sy(bullet.y), Math.max(7, state.bullet_radius * unit * 3), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // 3 x 3 grid above the tank: rows forward / none / back, columns left / none / right.
+  const cell = 9;
+  const gx = sx(tankX) - cell * 1.5;
+  const gy = sy(tankY) - state.tanks[0].display_scale * unit * 62 - cell * 3;
+  ctx.save();
+  ctx.fillStyle = "rgba(255, 255, 255, .85)";
+  ctx.fillRect(gx - 2, gy - 2, cell * 3 + 4, cell * 3 + 4);
+  for (let throttle = 0; throttle < 3; throttle++) {
+    for (let turn = 0; turn < 3; turn++) {
+      ctx.fillStyle = vision.dodge[3 * throttle + turn] ? "#2e8f75" : "#d0453a";
+      ctx.fillRect(gx + turn * cell + 1, gy + (2 - throttle) * cell + 1, cell - 2, cell - 2);
+    }
+  }
+  ctx.restore();
+
+  if (!vision.actions) return;
+  const lines = vision.actions;
+  const w = 210;
+  const h = 30 + lines.length * 22 + (vision.shieldVetoed ? 22 : 0);
+  const px = 14;
+  const py = height - h - 14;
+  ctx.save();
+  ctx.fillStyle = "rgba(255, 255, 255, .92)";
+  ctx.strokeStyle = "#e1e4e8";
+  ctx.fillRect(px, py, w, h);
+  ctx.strokeRect(px, py, w, h);
+  ctx.fillStyle = "#15181d";
+  ctx.font = "600 12px system-ui, sans-serif";
+  ctx.fillText(zh ? "网络的选择" : "Network's choice", px + 10, py + 19);
+  ctx.font = "12px system-ui, sans-serif";
+  lines.forEach((action, i) => {
+    const y = py + 38 + i * 22;
+    ctx.fillStyle = "#e9ecef";
+    ctx.fillRect(px + 10, y - 9, 80, 10);
+    ctx.fillStyle = i === 0 ? "#3f7f86" : "#9aa7ab";
+    ctx.fillRect(px + 10, y - 9, 80 * action[3], 10);
+    ctx.fillStyle = "#15181d";
+    ctx.fillText(`${Math.round(action[3] * 100)}%  ${actionName(action, zh)}`, px + 98, y);
+  });
+  if (vision.shieldVetoed) {
+    ctx.fillStyle = "#d0453a";
+    ctx.fillText(zh ? "护盾否决了一个危险动作" : "Shield vetoed a deadly action", px + 10, py + h - 10);
+  }
+  ctx.restore();
+}
+
+/**
+ * Physics runs at the original 25 Hz; drawing runs at the display's refresh
+ * rate, one physics frame behind, interpolating between the last two frames.
+ */
+function MazeCanvas({ frames, language }: { frames: { current: Frames }; language: Language }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !state) return;
-    const rect = canvas.getBoundingClientRect();
-    const ratio = window.devicePixelRatio || 1;
-    canvas.width = Math.max(1, Math.round(rect.width * ratio));
-    canvas.height = Math.max(1, Math.round(rect.height * ratio));
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.scale(ratio, ratio);
-    ctx.clearRect(0, 0, rect.width, rect.height);
-    const pad = Math.max(22, Math.min(rect.width, rect.height) * 0.055);
-    const unit = Math.min(
-      (rect.width - pad * 2) / state.world_width,
-      (rect.height - pad * 2) / state.world_height,
-    );
-    const worldW = state.world_width * unit;
-    const worldH = state.world_height * unit;
-    const left = (rect.width - worldW) / 2;
-    const top = (rect.height - worldH) / 2;
+    let raf = 0;
+    let size = "";
+    const draw = () => {
+      raf = requestAnimationFrame(draw);
+      const canvas = canvasRef.current;
+      const { prev, curr, at } = frames.current;
+      if (!canvas || !curr) return;
+      const rect = canvas.getBoundingClientRect();
+      const ratio = window.devicePixelRatio || 1;
+      const key = `${rect.width}x${rect.height}@${ratio}`;
+      if (key !== size) {
+        size = key;
+        canvas.width = Math.max(1, Math.round(rect.width * ratio));
+        canvas.height = Math.max(1, Math.round(rect.height * ratio));
+      }
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, rect.width, rect.height);
 
-    ctx.fillStyle = "#f0efeb";
-    ctx.fillRect(left, top, worldW, worldH);
-    ctx.strokeStyle = "#3f444d";
-    ctx.lineWidth = Math.max(4, state.wall_width * unit);
-    ctx.lineCap = "square";
-    for (const [x1, y1, x2, y2] of state.walls) {
-      ctx.beginPath();
-      ctx.moveTo(left + x1 * unit, top + y1 * unit);
-      ctx.lineTo(left + x2 * unit, top + y2 * unit);
-      ctx.stroke();
-    }
+      const t = Math.min(1, Math.max(0, (performance.now() - at) / PHYSICS_FRAME_MS));
+      const from = prev && continuous(prev, curr) ? prev : curr;
 
-    for (const bullet of state.bullets) {
-      ctx.beginPath();
-      ctx.fillStyle = paletteFor(state, bullet.owner).body;
-      ctx.arc(
-        left + bullet.x * unit,
-        top + bullet.y * unit,
-        Math.max(2, state.bullet_radius * unit),
-        0,
-        Math.PI * 2,
+      const pad = Math.max(22, Math.min(rect.width, rect.height) * 0.055);
+      const unit = Math.min(
+        (rect.width - pad * 2) / curr.world_width,
+        (rect.height - pad * 2) / curr.world_height,
       );
-      ctx.fill();
-    }
-    if (state.tanks[0]) {
-      const palette = paletteFor(state, 0);
-      drawTank(ctx, state.tanks[0], unit, left, top, palette.body, palette.turret);
-    }
-    if (state.tanks[1]) {
-      const palette = paletteFor(state, 1);
-      drawTank(ctx, state.tanks[1], unit, left, top, palette.body, palette.turret);
-    }
-  }, [state]);
+      const worldW = curr.world_width * unit;
+      const worldH = curr.world_height * unit;
+      const left = (rect.width - worldW) / 2;
+      const top = (rect.height - worldH) / 2;
+
+      ctx.fillStyle = "#f0efeb";
+      ctx.fillRect(left, top, worldW, worldH);
+      ctx.strokeStyle = "#3f444d";
+      ctx.lineWidth = Math.max(4, curr.wall_width * unit);
+      ctx.lineCap = "square";
+      for (const [x1, y1, x2, y2] of curr.walls) {
+        ctx.beginPath();
+        ctx.moveTo(left + x1 * unit, top + y1 * unit);
+        ctx.lineTo(left + x2 * unit, top + y2 * unit);
+        ctx.stroke();
+      }
+
+      const earlier = new Map(from.bullets.map((bullet) => [bullet.id, bullet]));
+      const radius = Math.max(2, curr.bullet_radius * unit);
+      for (const bullet of curr.bullets) {
+        const before = earlier.get(bullet.id) ?? bullet;
+        ctx.beginPath();
+        ctx.fillStyle = paletteFor(curr, bullet.owner).body;
+        ctx.arc(
+          left + lerp(before.x, bullet.x, t) * unit,
+          top + lerp(before.y, bullet.y, t) * unit,
+          radius, 0, Math.PI * 2,
+        );
+        ctx.fill();
+      }
+      let tank0: Tank | null = null;
+      for (let i = 0; i < curr.tanks.length; i++) {
+        const tank = curr.tanks[i];
+        const before = from.tanks[i];
+        const shown = before && before.alive && tank.alive
+          ? {
+            ...tank,
+            x: lerp(before.x, tank.x, t),
+            y: lerp(before.y, tank.y, t),
+            rotation: lerpAngle(before.rotation, tank.rotation, t),
+          }
+          : tank;
+        const palette = paletteFor(curr, i);
+        drawTank(ctx, shown, unit, left, top, palette.body, palette.turret);
+        if (i === 0) tank0 = shown;
+      }
+      if (curr.vision && tank0) {
+        drawVision(ctx, curr.vision, curr, tank0.x, tank0.y, unit, left, top, language === "zh", rect.height);
+      }
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, [frames, language]);
 
   return (
     <canvas
@@ -258,159 +358,68 @@ function MazeCanvas({ state, language }: { state: ArenaState | null; language: L
   );
 }
 
-function percent(value = 0) {
-  return `${(value * 100).toFixed(1)}%`;
+/** A short, falling square-wave pop: a shot leaving the barrel. */
+function playShot(ctx: AudioContext) {
+  const t = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = "square";
+  osc.frequency.setValueAtTime(880, t);
+  osc.frequency.exponentialRampToValueAtTime(220, t + 0.08);
+  gain.gain.setValueAtTime(0.08, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(t);
+  osc.stop(t + 0.1);
 }
 
-function millis(value = 0) {
-  return `${value.toFixed(value >= 10 ? 1 : 2)} ms`;
+/** Low-passed noise with a long decay: a tank destroyed. */
+function playExplosion(ctx: AudioContext) {
+  const t = ctx.currentTime;
+  const length = Math.floor(ctx.sampleRate * 0.6);
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length);
+  const noise = ctx.createBufferSource();
+  noise.buffer = buffer;
+  const filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.setValueAtTime(1400, t);
+  filter.frequency.exponentialRampToValueAtTime(120, t + 0.55);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.5, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+  noise.connect(filter).connect(gain).connect(ctx.destination);
+  noise.start(t);
 }
 
-const OPPONENT_LABELS: Record<string, string> = {
-  "laika-js": "Laika",
-  "hunter-js": "Hunter",
-  "dodger-js": "Dodger",
+const ENGLISH_POLICY_LABELS: Record<string, string> = {
+  "ppo-league": "League PPO (reinforcement learning)",
+  "p27-js-tactical-v2": "Tactical (MPC search)",
+  "laika-js": "Laika (original AI)",
+  "hunter-js": "Hunter (aggressive pursuit)",
+  "dodger-js": "Dodger (evasive)",
   "random-js": "Random",
 };
 
-const ENGLISH_POLICY_LABELS: Record<string, string> = {
-  "p27-js-tactical-v2": "Tactical (current champion)",
-  "p27-js-tactical": "Tactical Legacy (frozen baseline)",
-  "p27-js-tactical-v3-prior-k6": "Tactical Smooth + learned prior K6",
-  "p27-js-tactical-v3-prior-k4": "Tactical Smooth + learned prior K4",
-  "ppo-league": "League PPO (experimental, pure network self-play)",
-  "killfield-js": "KillField JS (third-party speed baseline)",
-  "laika-js": "Laika (official script)",
-  "hunter-js": "Hunter JS (strong pursuit)",
-  "dodger-js": "Dodger JS (strong evasion)",
-  "random-js": "Random JS",
-  "idle-js": "Idle JS",
-  "p27-exact-shield": "P27b + Exact Shield (strongest, slow)",
-  "p27-hybrid": "P27b Hybrid (fair experiment)",
-  p27b: "P27b (smooth)",
-  laika: "Laika",
-  hunter: "Hunter",
-  random: "Random",
-};
-
-function LeagueMonitor({
-  tactical,
-  killfield,
-  language,
-}: {
-  tactical: LeagueReport | null;
-  killfield: LeagueReport | null;
-  language: Language;
-}) {
-  const zh = language === "zh";
-  const opponentNames = tactical ? Object.keys(tactical.opponents) : [];
-  const delta = tactical && killfield
-    ? tactical.overall.winRate - killfield.overall.winRate
-    : 0;
-  return (
-    <section className="league-panel" aria-label={zh ? "自博弈晋级监控" : "Self-play promotion monitor"}>
-      <div className="league-heading">
-        <div>
-          <span className="eyebrow">CHAMPION GATE · SELF-PLAY LEAGUE</span>
-          <h2>{zh ? "自博弈晋级监控" : "Self-play promotion monitor"}</h2>
-          <p>{zh
-            ? "同种子、红黑换边，只使用当前可见状态。网页负责演示与监控；离线飞轮收集困难局并训练候选，全部门槛通过后才更新冠军。"
-            : "Matched seeds and swapped colors using visible state only. The site demonstrates and monitors; the offline flywheel collects hard games and evaluates candidates before any champion update."}</p>
-        </div>
-        <div className="champion-lock">
-          <span>{zh ? "冻结冠军" : "Frozen champion"}</span>
-          <strong>{CHAMPION_BASELINE.name}</strong>
-          <small>{zh ? "Laika 盲测" : "Laika blind test"} {CHAMPION_BASELINE.laikaBenchmark.wins}/{CHAMPION_BASELINE.laikaBenchmark.rounds} · {percent(CHAMPION_BASELINE.laikaBenchmark.winRate)}</small>
-        </div>
-      </div>
-
-      <div className="league-scoreboard">
-        <div>
-          <span>{zh ? "正式四对手联赛" : "Four-opponent league"}</span>
-          <strong>{tactical ? `${tactical.overall.win}/${tactical.overall.games}` : (zh ? "载入中" : "Loading")}</strong>
-          <small>Tactical · {tactical ? percent(tactical.overall.winRate) : "—"}</small>
-        </div>
-        <div>
-          <span>{zh ? "第三方基线" : "Third-party baseline"}</span>
-          <strong>{killfield ? `${killfield.overall.win}/${killfield.overall.games}` : (zh ? "载入中" : "Loading")}</strong>
-          <small>KillField · {killfield ? percent(killfield.overall.winRate) : "—"}</small>
-        </div>
-        <div className={delta > 0 ? "positive" : ""}>
-          <span>{zh ? "总体胜率差" : "Overall win-rate gap"}</span>
-          <strong>{tactical && killfield ? `${delta >= 0 ? "+" : ""}${(delta * 100).toFixed(1)} pp` : "—"}</strong>
-          <small>{zh ? "208 局，全新种子换边评测" : "208 games, fresh seeds, both colors"}</small>
-        </div>
-        <div>
-          <span>{zh ? "晋级门槛" : "Promotion gates"}</span>
-          <strong>{zh ? "5 项" : "5 gates"}</strong>
-          <small>{zh ? "Laika · 对手池 · 双死 · 换边 · p95" : "Laika · pool · double death · colors · p95"}</small>
-        </div>
-      </div>
-
-      <div className="league-table-wrap">
-        <table className="league-table">
-          <thead>
-            <tr>
-              <th>{zh ? "公平对手" : "Fair opponent"}</th>
-              <th>Tactical</th>
-              <th>KillField</th>
-              <th>{zh ? "差值" : "Delta"}</th>
-              <th>{zh ? "诊断" : "Diagnosis"}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {opponentNames.map((opponent) => {
-              const current = tactical?.opponents[opponent];
-              const baseline = killfield?.opponents[opponent];
-              const difference = current && baseline ? current.winRate - baseline.winRate : 0;
-              const diagnosis = !current
-                ? (zh ? "等待数据" : "Waiting for data")
-                : current.draw > 0
-                  ? (zh ? `${current.draw} 超时 · 优先改进终局能力` : `${current.draw} timeouts · improve endgame`)
-                  : current.colorGap > CHAMPION_BASELINE.promotionGate.maximumColorGap
-                    ? (zh ? `换边差 ${percent(current.colorGap)} · 扩大样本` : `Color gap ${percent(current.colorGap)} · expand sample`)
-                    : (zh ? "稳定" : "Stable");
-              return (
-                <tr key={opponent}>
-                  <th>{OPPONENT_LABELS[opponent] ?? opponent}</th>
-                  <td>{current ? `${current.win}/${current.games} · ${percent(current.winRate)}` : "—"}</td>
-                  <td>{baseline ? `${baseline.win}/${baseline.games} · ${percent(baseline.winRate)}` : "—"}</td>
-                  <td className={difference > 0 ? "positive-text" : difference < 0 ? "negative-text" : ""}>
-                    {current && baseline ? `${difference >= 0 ? "+" : ""}${(difference * 100).toFixed(1)} pp` : "—"}
-                  </td>
-                  <td>{diagnosis}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="route-strip" aria-label={zh ? "后续技术路线" : "Technical roadmap"}>
-        <span className="done">{zh ? "1 · Tactical Legacy 基线" : "1 · Tactical Legacy baseline"}</span>
-        <span className="done">{zh ? "2 · 104 局换边联赛" : "2 · 104-game color-swapped league"}</span>
-        <span className="done">{zh ? "3 · Dodger 反规避" : "3 · Anti-evasion vs Dodger"}</span>
-        <span className="done">{zh ? "4 · 300 局盲测晋级" : "4 · 300-game blind promotion"}</span>
-        <span className="done">{zh ? "5 · 双亡安全审计" : "5 · Double-death safety audit"}</span>
-        <span className="active">{zh ? "6 · 夜间困难局飞轮" : "6 · Nightly hard-game flywheel"}</span>
-      </div>
-    </section>
-  );
-}
-
 export function Arena() {
-  const language = useSyncExternalStore(subscribeLanguage, languageSnapshot, () => "zh");
+  const language = useLanguage();
   const [state, setState] = useState<ArenaState | null>(null);
-  const [runtime, setRuntime] = useState<RuntimeKind>("browser");
   const [connected, setConnected] = useState(false);
   const [mode, setMode] = useState<Mode>("watch");
-  const [leftPolicy, setLeftPolicy] = useState("p27-js-tactical-v3");
+  const [leftPolicy, setLeftPolicy] = useState("ppo-league");
   const [rightPolicy, setRightPolicy] = useState("laika-js");
   const [seed, setSeed] = useState("970000");
-  const [muted, setMuted] = useState(true);
-  const [tacticalLeague, setTacticalLeague] = useState<LeagueReport | null>(null);
-  const [killfieldLeague, setKillfieldLeague] = useState<LeagueReport | null>(null);
   const arenaRef = useRef<HTMLDivElement>(null);
+  // Every physics frame goes to the canvas; React re-renders only when
+  // something the controls show has changed.
+  const framesRef = useRef<Frames>({ prev: null, curr: null, at: 0 });
+  const uiKeyRef = useRef("");
+  // Sound starts muted: browsers only allow audio after a click.
+  const [muted, setMuted] = useState(true);
+  const mutedRef = useRef(true);
+  const [vision, setVision] = useState(false);
+  const audioRef = useRef<AudioContext | null>(null);
   const browserWorkerRef = useRef<Worker | null>(null);
   const workerRequestIdRef = useRef(0);
   const seedRef = useRef(seed);
@@ -427,123 +436,84 @@ export function Arena() {
     document.title = zh ? "Tank Trouble AI 对战场" : "Tank Trouble AI Arena";
   }, [zh]);
 
-  const changeLanguage = (next: Language) => {
-    window.localStorage.setItem(LANGUAGE_STORAGE_KEY, next);
-    window.dispatchEvent(new Event(LANGUAGE_EVENT));
-  };
+  const changeLanguage = setLanguage;
 
   useEffect(() => {
     seedRef.current = seed;
   }, [seed]);
 
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([
-      fetch("/league-tactical-latest.json", { cache: "no-store" }).then((response) => response.json()),
-      fetch("/league-killfield-latest.json", { cache: "no-store" }).then((response) => response.json()),
-    ]).then(([tactical, killfield]) => {
-      if (cancelled) return;
-      setTacticalLeague(tactical as LeagueReport);
-      setKillfieldLeague(killfield as LeagueReport);
-    }).catch(() => {
-      if (!cancelled) {
-        setTacticalLeague(null);
-        setKillfieldLeague(null);
-      }
-    });
-    return () => { cancelled = true; };
+  const receive = useCallback((next: ArenaState, force: boolean) => {
+    const frames = framesRef.current;
+    const previous = frames.curr;
+    framesRef.current = { prev: previous, curr: next, at: performance.now() };
+    const ctx = audioRef.current;
+    if (!mutedRef.current && ctx && previous && previous.round === next.round) {
+      if (next.bullets.length > previous.bullets.length) playShot(ctx);
+      if (next.tanks.some((tank, i) => previous.tanks[i]?.alive && !tank.alive)) playExplosion(ctx);
+    }
+    const key = [
+      next.scores.join(":"), next.left_policy, next.right_policy, next.left_label, next.right_label,
+      next.mode, next.paused, next.available_policies.length,
+    ].join("|");
+    if (force || key !== uiKeyRef.current) {
+      uiKeyRef.current = key;
+      setState(next);
+    }
+    setConnected(true);
   }, []);
 
   useEffect(() => {
-    if (runtime === "browser") {
-      const workerRequests = workerRequestsRef.current;
-      const browserWorker = new BrowserArenaWorker({ name: "tank-trouble-arena" });
-      browserWorkerRef.current = browserWorker;
-      browserWorker.onmessage = (event: MessageEvent) => {
-        const message = event.data as {
-          type: "state" | "response" | "error";
-          id?: number;
-          state?: ArenaState;
-          message?: string;
-        };
-        if (message.type === "state" && message.state) {
-          setState(message.state);
-          setConnected(true);
-          return;
-        }
-        if (message.id === undefined) {
-          if (message.type === "error") setConnected(false);
-          return;
-        }
-        const pending = workerRequests.get(message.id);
-        if (!pending) return;
-        workerRequests.delete(message.id);
-        if (message.type === "response" && message.state) {
-          setState(message.state);
-          setConnected(true);
-          pending.resolve(message.state);
-        } else {
-          pending.reject(new Error(message.message ?? "browser worker command failed"));
-        }
+    const workerRequests = workerRequestsRef.current;
+    const browserWorker = new BrowserArenaWorker({ name: "tank-trouble-arena" });
+    browserWorkerRef.current = browserWorker;
+    browserWorker.onmessage = (event: MessageEvent) => {
+      const message = event.data as {
+        type: "state" | "response" | "error";
+        id?: number;
+        state?: ArenaState;
+        message?: string;
       };
-      browserWorker.onerror = () => setConnected(false);
-      browserWorker.postMessage({ type: "init", seed: Number(seedRef.current) || 970000 });
-      return () => {
-        browserWorker.postMessage({ type: "dispose" });
-        browserWorker.terminate();
-        browserWorkerRef.current = null;
-        for (const pending of workerRequests.values()) {
-          pending.reject(new Error("browser arena worker stopped"));
-        }
-        workerRequests.clear();
-      };
-    }
-
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      try {
-        const response = await fetch(`${API}/state`, { cache: "no-store" });
-        if (!response.ok) throw new Error("offline");
-        const next = (await response.json()) as ArenaState;
-        if (!cancelled) {
-          setState(next);
-          setConnected(true);
-          setMode(next.mode);
-        }
-      } catch {
-        if (!cancelled) setConnected(false);
-      } finally {
-        if (!cancelled) timer = setTimeout(poll, 40);
+      if (message.type === "state" && message.state) {
+        receive(message.state, false);
+        return;
+      }
+      if (message.id === undefined) {
+        if (message.type === "error") setConnected(false);
+        return;
+      }
+      const pending = workerRequests.get(message.id);
+      if (!pending) return;
+      workerRequests.delete(message.id);
+      if (message.type === "response" && message.state) {
+        receive(message.state, true);
+        pending.resolve(message.state);
+      } else {
+        pending.reject(new Error(message.message ?? "browser worker command failed"));
       }
     };
-    poll();
+    browserWorker.onerror = () => setConnected(false);
+    browserWorker.postMessage({ type: "init", seed: Number(seedRef.current) || 970000 });
     return () => {
-      cancelled = true;
-      clearTimeout(timer);
+      browserWorker.postMessage({ type: "dispose" });
+      browserWorker.terminate();
+      browserWorkerRef.current = null;
+      for (const pending of workerRequests.values()) {
+        pending.reject(new Error("browser arena worker stopped"));
+      }
+      workerRequests.clear();
     };
-  }, [runtime]);
+  }, [receive]);
 
   const dispatch = useCallback(async (payload: Record<string, unknown>) => {
-    if (runtime === "browser") {
-      const browserWorker = browserWorkerRef.current;
-      if (!browserWorker) throw new Error("browser arena worker is not ready");
-      const id = workerRequestIdRef.current + 1;
-      workerRequestIdRef.current = id;
-      return new Promise<ArenaState>((resolve, reject) => {
-        workerRequestsRef.current.set(id, { resolve, reject });
-        browserWorker.postMessage({ type: "command", id, payload });
-      });
-    }
-    try {
-      const next = await command(payload) as ArenaState;
-      setConnected(true);
-      return next;
-    } catch (error) {
-      setConnected(false);
-      throw error;
-    }
-  }, [runtime]);
+    const browserWorker = browserWorkerRef.current;
+    if (!browserWorker) throw new Error("browser arena worker is not ready");
+    const id = workerRequestIdRef.current + 1;
+    workerRequestIdRef.current = id;
+    return new Promise<ArenaState>((resolve, reject) => {
+      workerRequestsRef.current.set(id, { resolve, reject });
+      browserWorker.postMessage({ type: "command", id, payload });
+    });
+  }, []);
 
   const sendControls = useCallback(() => {
     if (mode !== "play") return;
@@ -585,41 +555,41 @@ export function Arena() {
     };
   }, [dispatch, sendControls]);
 
+  const toggleSound = () => {
+    if (!audioRef.current) audioRef.current = new AudioContext();
+    void audioRef.current.resume();
+    mutedRef.current = !muted;
+    setMuted(!muted);
+  };
+
   const policies = state?.available_policies ?? [
-    { value: "p27-exact-shield", label: "P27b + Exact Shield（最强·慢）" },
-    { value: "p27-hybrid", label: "P27b Hybrid（公平实验）" },
-    { value: "p27b", label: "P27b（流畅）" },
-    { value: "laika", label: "Laika" },
-    { value: "hunter", label: "Hunter" },
-    { value: "random", label: "Random" },
+    { value: "ppo-league", label: "League PPO（强化学习）" },
   ];
   const policyLabel = (policy: { value: string; label: string }) => (
     zh ? policy.label : (ENGLISH_POLICY_LABELS[policy.value] ?? policy.label)
   );
   const leftDisplayLabel = !zh && (state?.left_policy === "human" || mode === "play")
     ? "You"
-    : state?.left_label ?? (runtime === "browser" ? "Tank Trouble Tactical" : (zh ? "P27b（流畅）" : "P27b (smooth)"));
+    : state?.left_label ?? "League PPO";
   const leftPalette = state ? paletteFor(state, 0) : RED_PALETTE;
   const rightPalette = state ? paletteFor(state, 1) : BLACK_PALETTE;
 
-  const changeMode = async (next: Mode) => {
-    setMode(next);
-    const browser = runtime === "browser";
-    const left = next === "watch"
-      ? (browser ? "p27-js-tactical-v2" : "p27b")
-      : next === "play"
-        ? "human"
-        : (leftPolicy === "human" || leftPolicy.endsWith("laika") || leftPolicy.endsWith("laika-js"))
-          ? (browser ? "p27-js-tactical-v2" : "p27b")
-          : leftPolicy;
-    const right = next === "watch"
-      ? (browser ? "laika-js" : "laika")
-      : next === "play"
-        ? (browser ? "p27-js-tactical-v2" : "laika")
-        : rightPolicy;
+  // Watching an AI against Laika runs the game's own Laika, exactly as the
+  // evaluation does; any other pairing is two controllers playing each other.
+  const spectate = (left: string, right: string): Mode => (
+    right === "laika-js" && left !== "laika-js" ? "watch" : "selfplay"
+  );
+
+  const changeMode = async (next: "watch" | "play") => {
+    const left = next === "play" ? "human" : "ppo-league";
+    const right = next === "play" ? "ppo-league" : "laika-js";
+    const engineMode = next === "play" ? "play" : spectate(left, right);
+    setMode(engineMode);
     setLeftPolicy(left);
     setRightPolicy(right);
-    await dispatch({ action: "mode", mode: next, left_policy: left, right_policy: right });
+    await dispatch({ action: "mode", mode: engineMode, left_policy: left, right_policy: right });
+    // A score belongs to a pairing; a new pairing starts from 0 : 0.
+    await dispatch({ action: "reset_score" });
     if (next !== "play") {
       keysRef.current.clear();
       controlsRef.current = { ...EMPTY };
@@ -628,111 +598,83 @@ export function Arena() {
   };
 
   const updateMatch = async (left: string, right: string) => {
+    const engineMode = mode === "play" ? "play" : spectate(left, right);
+    setMode(engineMode);
     setLeftPolicy(left);
     setRightPolicy(right);
-    await dispatch({ action: "mode", mode, left_policy: left, right_policy: right });
+    await dispatch({ action: "mode", mode: engineMode, left_policy: left, right_policy: right });
+    await dispatch({ action: "reset_score" });
   };
-
-  const changeRuntime = (next: RuntimeKind) => {
-    if (next === runtime) return;
-    keysRef.current.clear();
-    controlsRef.current = { ...EMPTY };
-    setState(null);
-    setConnected(false);
-    setRuntime(next);
-    setMode("watch");
-    setLeftPolicy(next === "browser" ? "p27-js-tactical-v2" : "p27b");
-    setRightPolicy(next === "browser" ? "laika-js" : "laika");
-  };
-
-  const statusCopy = useMemo(() => {
-    if (!connected) {
-      return runtime === "browser"
-        ? (zh ? "正在启动浏览器对战 Worker" : "Starting browser battle worker")
-        : (zh ? "等待本地对战服务" : "Waiting for the local battle service");
-    }
-    if (state?.paused) return zh ? "已暂停" : "Paused";
-    if (state?.frozen) return zh ? "本回合结算中" : "Settling this round";
-    if (mode === "play") return zh ? "WASD / 方向键移动 · Q / 空格开火" : "WASD / arrow keys to move · Q / Space to fire";
-    if (mode === "selfplay") return zh ? "双方 AI 正在实时自博弈" : "Both AIs are playing live";
-    if (runtime === "browser" && state?.left_policy === "ppo-league") {
-      return zh
-        ? "纯网络：联赛自博弈 PPO，每帧一次前向（约 1 ms），不做任何搜索"
-        : "Pure network: league self-play PPO, one forward pass per frame (~1 ms), no search";
-    }
-    if (runtime === "browser") {
-      return zh
-        ? "纯浏览器模式：H36 搜索 + 按需两段式安全验证，无 Python 往返"
-        : "Browser-native H36 search with on-demand two-stage safety checks; no Python round trips";
-    }
-    if (state?.left_policy === "p27-exact-shield") {
-      return zh ? "最强慢速模式：逐帧精确状态安全审计" : "Strongest slow mode: frame-exact safety audit";
-    }
-    if (state?.left_policy === "p27-hybrid") {
-      return zh ? "实验模式：P27b 网络先验 + 公平采样搜索" : "Experimental: P27b neural prior with fair sampled search";
-    }
-    return zh ? "P27b Frozen：每个 25 Hz 物理帧都重新决策" : "P27b Frozen: a new decision on every 25 Hz physics frame";
-  }, [connected, mode, runtime, state?.frozen, state?.left_policy, state?.paused, zh]);
 
   return (
     <main className="site-shell">
-      <header className="masthead">
-        <div>
-          <h1>tank trouble ai</h1>
-          <p className="intro">{zh
-            ? "浏览器里的迷宫坦克对战。观察搜索型 AI 挑战 Laika，亲自上场，或让两个控制器持续自博弈。"
-            : "Maze tank battles in your browser. Watch a search-based AI challenge Laika, play it yourself, or run two controllers head to head."}</p>
+      <section className="control-deck top-bar" aria-label={zh ? "对战设置" : "Match setup"}>
+        <div className="mode-tabs">
+          <button className={mode !== "play" ? "active" : ""} onClick={() => changeMode("watch")}>{zh ? "观战" : "Watch"}</button>
+          <button className={mode === "play" ? "active" : ""} onClick={() => changeMode("play")}>{zh ? "和它打" : "Play"}</button>
         </div>
-        <div className="header-actions">
-          <span className="browser-badge">JS · 25 FPS</span>
-          <div className="language-switch" role="group" aria-label={zh ? "语言切换" : "Language switcher"}>
-            <button type="button" className={zh ? "active" : ""} aria-pressed={zh} onClick={() => changeLanguage("zh")}>中</button>
-            <button type="button" className={!zh ? "active" : ""} aria-pressed={!zh} onClick={() => changeLanguage("en")}>EN</button>
-          </div>
-          <a className="repo-link" href="https://github.com/Mingjie-Mao/tank-trouble" target="_blank" rel="noreferrer">
-            GitHub <span aria-hidden="true">↗</span>
-          </a>
-        </div>
-      </header>
-
-      <section className="arena-card" ref={arenaRef}>
-        <div className="score-row">
+        {mode === "play" ? (
+          <label>
+            <span>{zh ? "对手" : "Opponent"}</span>
+            <select value={rightPolicy} onChange={(event) => updateMatch("human", event.target.value)}>
+              {policies.map((policy) => <option key={policy.value} value={policy.value}>{policyLabel(policy)}</option>)}
+            </select>
+          </label>
+        ) : (
+          <>
+            <label>
+              <span>{zh ? "红方" : "Red"}</span>
+              <select value={leftPolicy} onChange={(event) => updateMatch(event.target.value, rightPolicy)}>
+                {policies.map((policy) => <option key={policy.value} value={policy.value}>{policyLabel(policy)}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>{zh ? "黑方" : "Black"}</span>
+              <select value={rightPolicy} onChange={(event) => updateMatch(leftPolicy, event.target.value)}>
+                {policies.map((policy) => <option key={policy.value} value={policy.value}>{policyLabel(policy)}</option>)}
+              </select>
+            </label>
+          </>
+        )}
+        <div className="score-row" aria-label={zh ? "比分" : "Score"}>
           <div className="combatant">
             <span className="color-chip" style={{ background: leftPalette.body }} />
             <strong>{leftDisplayLabel}</strong>
             <span className="score">{state?.scores?.[0] ?? 0}</span>
           </div>
-          <span className="versus">VS</span>
+          <span className="versus">:</span>
           <div className="combatant right">
             <span className="score">{state?.scores?.[1] ?? 0}</span>
             <strong>{state?.right_label ?? "Laika"}</strong>
             <span className="color-chip" style={{ background: rightPalette.body }} />
           </div>
         </div>
+      </section>
 
-        <div className="round-row">
-          <div>
-            <strong>{zh ? `第 ${state?.round ?? 1} 回合` : `Round ${state?.round ?? 1}`}</strong>
-            <span>{statusCopy}</span>
-          </div>
-          <div className={`live-pill ${connected ? "online" : "offline"}`}>
-            <span />{connected
-              ? `${zh ? "实时" : "LIVE"} · ${(state?.effective_fps ?? 0).toFixed(1)} FPS`
-              : runtime === "browser" ? "JS WORKER STARTING" : "PYTHON BACKEND OFFLINE"}
-          </div>
-        </div>
-
+      <section className="arena-card" ref={arenaRef}>
+        {mode === "play" && (
+          <p className="play-hint">{zh ? "WASD / 方向键移动 · Q / 空格开火" : "WASD / arrow keys to move · Q / Space to fire"}</p>
+        )}
         <div className="stage-wrap">
-          <MazeCanvas state={state} language={language} />
-          {!connected && runtime === "python" && (
-            <div className="connection-card" role="status">
-              <strong>{zh ? "对战服务还没有连接" : "Battle service is not connected"}</strong>
-              <span>{zh ? "在项目终端运行 ./run_web_arena.sh" : "Run ./run_web_arena.sh in the project terminal"}</span>
-            </div>
-          )}
+          <MazeCanvas frames={framesRef} language={language} />
+          {!connected && <div className="stage-loading">{zh ? "加载中…" : "Loading…"}</div>}
           <div className="stage-actions">
-            <button type="button" aria-label={muted ? (zh ? "开启声音" : "Unmute") : (zh ? "静音" : "Mute")} onClick={() => setMuted(!muted)}>
-              {muted ? (zh ? "音×" : "S×") : (zh ? "音" : "S")}
+            {mode !== "play" && (
+              <button
+                type="button"
+                className={vision ? "active" : ""}
+                aria-label={zh ? "AI 视角" : "AI view"}
+                title={zh ? "AI 视角" : "AI view"}
+                onClick={() => {
+                  setVision(!vision);
+                  void dispatch({ action: "vision", enabled: !vision });
+                }}
+              >
+                👁
+              </button>
+            )}
+            <button type="button" aria-label={muted ? (zh ? "开启声音" : "Unmute") : (zh ? "静音" : "Mute")} onClick={toggleSound}>
+              {muted ? "🔇" : "🔊"}
             </button>
             <button
               type="button"
@@ -749,99 +691,19 @@ export function Arena() {
       </section>
 
       <section className="control-deck" aria-label={zh ? "对战控制" : "Battle controls"}>
-        <div className="runtime-switch" role="group" aria-label={zh ? "运行时选择" : "Runtime selection"}>
-          <span>{zh ? "运行时" : "Runtime"}</span>
-          <button className={runtime === "browser" ? "active" : ""} onClick={() => changeRuntime("browser")}>Browser JS</button>
-          {PYTHON_RESEARCH_ENABLED && (
-            <button className={runtime === "python" ? "active" : ""} onClick={() => changeRuntime("python")}>Python Research</button>
-          )}
-          <small>{runtime === "browser" ? (zh ? "物理、Laika、搜索在独立 Worker" : "Physics, Laika and search in a dedicated Worker") : "P27b / Hybrid / Exact Shield"}</small>
-        </div>
-        <div className="mode-tabs">
-          <button className={mode === "watch" ? "active" : ""} onClick={() => changeMode("watch")}>{zh ? "看它打" : "Watch"}</button>
-          <button className={mode === "play" ? "active" : ""} onClick={() => changeMode("play")}>{zh ? "和它打" : "Play"}</button>
-          <button className={mode === "selfplay" ? "active" : ""} onClick={() => changeMode("selfplay")}>AI vs AI</button>
-        </div>
-
-        <div className="setting-row">
-          <button className="secondary" onClick={() => dispatch({ action: "new_maze", seed: seed || "random" })}>{zh ? "换一张迷宫" : "New maze"} <kbd>R</kbd></button>
-          <button className="secondary" onClick={() => dispatch({ action: "reset_score" })}>{zh ? "清零比分" : "Reset score"}</button>
-          <label>
-            <span>{zh ? "种子" : "Seed"}</span>
-            <input value={seed} onChange={(event) => setSeed(event.target.value)} placeholder="random" />
-          </label>
-          {mode === "selfplay" && (
-            <>
-              <label>
-                <span>{zh ? "红方" : "Red"}</span>
-                <select value={leftPolicy} onChange={(event) => updateMatch(event.target.value, rightPolicy)}>
-                  {policies.map((policy) => <option key={policy.value} value={policy.value}>{policyLabel(policy)}</option>)}
-                </select>
-              </label>
-              <label>
-                <span>{zh ? "黑方" : "Black"}</span>
-                <select value={rightPolicy} onChange={(event) => updateMatch(leftPolicy, event.target.value)}>
-                  {policies.map((policy) => <option key={policy.value} value={policy.value}>{policyLabel(policy)}</option>)}
-                </select>
-              </label>
-            </>
-          )}
-          {mode === "watch" && (
-            <label className={runtime === "browser" ? "" : ""}>
-              <span>{zh ? "观战 AI" : "Watch AI"}</span>
-              <select
-                value={leftPolicy}
-                onChange={(event) => updateMatch(event.target.value, "laika")}
-              >
-                {policies
-                  .filter((policy) => policy.value !== "laika" && policy.value !== "laika-js")
-                  .map((policy) => <option key={policy.value} value={policy.value}>{policyLabel(policy)}</option>)}
-              </select>
-            </label>
-          )}
+        <button className="secondary" onClick={() => dispatch({ action: "new_maze", seed: seed || "random" })}>{zh ? "换迷宫" : "New maze"} <kbd>R</kbd></button>
+        <button className="secondary" onClick={() => dispatch({ action: "reset_score" })}>{zh ? "清零比分" : "Reset score"}</button>
+        <label>
+          <span>{zh ? "种子" : "Seed"}</span>
+          <input value={seed} onChange={(event) => setSeed(event.target.value)} placeholder="random" />
+        </label>
+        {/* A plain link: vinext's <Link> prefetch throws on Cloudflare Pages. */}
+        <a className="secondary report-link" href="/report">{zh ? "方法与结果" : "Method & results"}</a>
+        <div className="language-switch" role="group" aria-label={zh ? "语言切换" : "Language switcher"}>
+          <button type="button" className={zh ? "active" : ""} aria-pressed={zh} onClick={() => changeLanguage("zh")}>中</button>
+          <button type="button" className={!zh ? "active" : ""} aria-pressed={!zh} onClick={() => changeLanguage("en")}>EN</button>
         </div>
       </section>
-
-      <section className="telemetry" aria-label={zh ? "实时性能" : "Live performance"}>
-        <div className="metric lead">
-          <span>{state?.left_policy === "p27b" ? (zh ? "在线搜索" : "Online search") : (zh ? "搜索率" : "Search rate")}</span>
-          <strong>{percent(state?.telemetry.search_rate)}</strong>
-          <small>{state?.left_policy === "p27b" ? (zh ? "纯网络，不做 rollout" : "Pure network, no rollout") : (zh ? "搜索帧占比" : "Share of searched frames")}</small>
-        </div>
-        <div className="metric">
-          <span>{zh ? "决策 p95" : "Decision p95"}</span>
-          <strong>{millis(state?.telemetry.p95_ms)}</strong>
-          <small>{runtime === "browser" ? (zh ? "JS 搜索控制器" : "JS search controller") : state?.left_policy === "p27b" ? (zh ? "P27b 网络决策" : "P27b network decision") : (zh ? "网络 + 安全审计" : "Network + safety audit")}</small>
-        </div>
-        <div className="metric">
-          <span>{runtime === "browser" || state?.left_policy === "p27b" ? (zh ? "物理帧率" : "Physics rate") : (zh ? "危险接管率" : "Safety takeover rate")}</span>
-          <strong>{runtime === "browser" || state?.left_policy === "p27b"
-            ? `${(state?.effective_fps ?? 0).toFixed(1)} FPS`
-            : percent(state?.telemetry.change_rate)}</strong>
-          <small>{runtime === "browser" || state?.left_policy === "p27b"
-            ? (zh ? "目标 25 FPS" : "25 FPS target")
-            : (zh ? `${state?.telemetry.search_changes ?? 0} 次不安全审计` : `${state?.telemetry.search_changes ?? 0} unsafe audits`)}</small>
-        </div>
-        <div className="metric">
-          <span>{zh ? "当前决策" : "Current decision"}</span>
-          <strong>{millis(state?.runtime.left_decision_ms)}</strong>
-          <small>{state?.telemetry.last_reason ?? "network"}</small>
-        </div>
-        <div className="metric">
-          <span>{zh ? "连续获胜" : "Win streak"}</span>
-          <strong>{state?.streak ?? 0}</strong>
-          <small>{zh ? "最佳" : "Best"} {state?.best_streak ?? 0}</small>
-        </div>
-      </section>
-
-      <LeagueMonitor tactical={tacticalLeague} killfield={killfieldLeague} language={language} />
-
-      <footer>
-        <span>{runtime === "browser"
-          ? (zh ? "浏览器 JavaScript 物理、Laika 与搜索 · KillField MIT 对照基线" : "Browser JavaScript physics, Laika and search · KillField MIT comparison baseline")
-          : (zh ? "JavaScript/Canvas 渲染 · Python 1:1 物理 · P27b Frozen" : "JavaScript/Canvas rendering · Python 1:1 physics · P27b Frozen")}</span>
-        <span>seed {state?.seed ?? seed} · <a href="https://github.com/Mingjie-Mao/tank-trouble" target="_blank" rel="noreferrer">Mingjie-Mao/tank-trouble</a></span>
-      </footer>
     </main>
   );
 }

@@ -63,7 +63,7 @@ b = g2.bullets[0]
 spd = math.hypot(b.x_speed, b.y_speed) * C.BULLETHITCHECKINTERVALS
 check("弹速 = 4.5*(SCALE/50)/帧",
       abs(spd - C.BULLETSPEED * (g2.scale / 50)) < 1e-9, f"got {spd}")
-check("当帧新建子弹未移动 (下一帧才动)", True)  # 由 just_created 保证
+check("当帧新建子弹未移动 (下一帧才动)", True)  # 子弹先于坦克执行, 坦克阶段新开的子弹下一帧才动
 x0, y0 = b.x, b.y
 g2.step()
 moved = math.hypot(b.x - x0, b.y - y0)
@@ -85,6 +85,42 @@ check("场地中心一般不命中",
           g3.walls, g3.wall_half_t,
           (g3.tank_fields[0]["x"] + 0.5) * g3.scale,
           (g3.tank_fields[0]["y"] + 0.5) * g3.scale))
+
+print("=" * 64)
+print("[4b] 执行顺序与自伤 (原版: 子弹先于坦克执行, 无发射者豁免)")
+
+
+def _clear_run(g, t, heading):
+    rad = (heading - 90) * math.pi / 180
+    d = 0
+    while d < 6 * g.scale and not g.wall_hit(t.x + math.cos(rad) * d, t.y + math.sin(rad) * d):
+        d += 1
+    return d
+
+
+# 出膛点在炮管矩形内 (本地 y=-51.14 > 尖端 -55), 但子弹先动, 直线行进中开火不自杀
+g4 = Game(seed=5, ai_enabled=False)
+t4 = g4.tanks[0]
+t4.rotation = max((0, 90, 180, -90), key=lambda h: _clear_run(g4, t4, h))
+self_hits = []
+for f in range(14):
+    t4.forward, t4.fire = True, f == 4
+    self_hits += [e for e in g4.step() if e[0] == "hit" and e[1] == 0 and e[2] == 0]
+check("直线前进中开火不会打中自己", t4.alive and not self_hits, str(self_hits))
+
+# 车头顶墙开火: 子弹反弹回车身, 原版无豁免 -> 自杀
+g4 = Game(seed=1, ai_enabled=False)
+t4 = g4.tanks[0]
+t4.rotation = min((0, 90, 180, -90), key=lambda h: _clear_run(g4, t4, h))
+for _ in range(40):
+    t4.forward = True
+    g4.step()
+t4.forward, t4.fire = False, True
+self_hits = []
+for _ in range(12):
+    self_hits += [e for e in g4.step() if e[0] == "hit" and e[1] == 0 and e[2] == 0]
+    t4.fire = False
+check("车头顶墙开火被自己的反弹弹打死", not t4.alive and self_hits == [("hit", 0, 0)], str(self_hits))
 
 print("[5] Laika 行为 (500 帧观察)")
 env = TankTroubleEnv(seed=2024)

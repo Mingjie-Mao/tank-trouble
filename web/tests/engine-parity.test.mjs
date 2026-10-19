@@ -58,7 +58,7 @@ function snapshot(g, events) {
     floats.push(t.x, t.y, t.rotation);
   }
   for (const b of g.bullets) {
-    parts.push(`B${[b.name, String(b.owner.number), String(b.lifetime), bit(b.hasExitedOwner)].join(",")}`);
+    parts.push(`B${[b.name, String(b.owner.number), String(b.lifetime), bit(b.hasBounced)].join(",")}`);
     floats.push(b.x, b.y, b.xSpeed, b.ySpeed);
   }
   for (const e of events) parts.push(`E${e.map((v) => (v === null ? "null" : String(v))).join(",")}`);
