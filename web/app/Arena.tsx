@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type Language, setLanguage, useLanguage } from "./language";
 import BrowserArenaWorker from "../workers/browser-arena.worker.js?worker";
+import SearchHelperWorker from "../workers/search-helper.worker.js?worker";
+import arenaWasmUrl from "../lib/wasm/tank_bg.wasm?url";
 
 type Mode = "watch" | "play" | "selfplay";
 type Controls = {
@@ -47,6 +49,7 @@ type ArenaState = {
   bullets: { id: string; x: number; y: number; owner: number; lifetime: number }[];
   runtime: {
     step_ms: number;
+    search_workers?: number;
     left_decision_ms: number;
     right_decision_ms: number;
   };
@@ -137,15 +140,10 @@ function drawTank(
 const RED_PALETTE = { body: "#c53f36", turret: "#e05a50" };
 const BLACK_PALETTE = { body: "#25292f", turret: "#444a53" };
 
-function isTacticalPolicy(policy: string | undefined) {
-  return Boolean(policy?.startsWith("p27-js-tactical"));
-}
-
 function paletteFor(state: ArenaState, index: number) {
   const policies = [state.left_policy, state.right_policy];
   const policy = policies[index];
   const other = policies[1 - index];
-  if (isTacticalPolicy(policy) && !isTacticalPolicy(other)) return RED_PALETTE;
   if (policy === "laika-js" && other !== "laika-js") return BLACK_PALETTE;
   return index === 0 ? RED_PALETTE : BLACK_PALETTE;
 }
@@ -394,11 +392,8 @@ function playExplosion(ctx: AudioContext) {
 }
 
 const ENGLISH_POLICY_LABELS: Record<string, string> = {
-  "ppo-league": "League PPO (reinforcement learning)",
-  "p27-js-tactical-v2": "Tactical (MPC search)",
+  "ppo-league": "Our AI (network + real-time search)",
   "laika-js": "Laika (original AI)",
-  "hunter-js": "Hunter (aggressive pursuit)",
-  "dodger-js": "Dodger (evasive)",
   "random-js": "Random",
 };
 
@@ -492,10 +487,21 @@ export function Arena() {
       }
     };
     browserWorker.onerror = () => setConnected(false);
-    browserWorker.postMessage({ type: "init", seed: Number(seedRef.current) || 970000 });
+    const wasm = new URL(arenaWasmUrl, location.href).href;
+    // Helpers hold copies of the arena and share the search's rollouts; leave
+    // a core for the page and one for the arena worker.
+    const helperCount = Math.min(7, Math.max(0, (navigator.hardwareConcurrency || 4) - 2));
+    const helpers = Array.from({ length: helperCount }, (_, i) => new SearchHelperWorker({ name: `tank-trouble-search-${i + 1}` }));
+    const ports = helpers.map((helper) => {
+      const channel = new MessageChannel();
+      helper.postMessage({ type: "connect", port: channel.port2 }, [channel.port2]);
+      return channel.port1;
+    });
+    browserWorker.postMessage({ type: "init", seed: Number(seedRef.current) || 970000, wasm, helpers: ports }, ports);
     return () => {
       browserWorker.postMessage({ type: "dispose" });
       browserWorker.terminate();
+      helpers.forEach((helper) => helper.terminate());
       browserWorkerRef.current = null;
       for (const pending of workerRequests.values()) {
         pending.reject(new Error("browser arena worker stopped"));
@@ -563,14 +569,14 @@ export function Arena() {
   };
 
   const policies = state?.available_policies ?? [
-    { value: "ppo-league", label: "League PPO（强化学习）" },
+    { value: "ppo-league", label: "我们的 AI（网络 + 实时搜索）" },
   ];
   const policyLabel = (policy: { value: string; label: string }) => (
     zh ? policy.label : (ENGLISH_POLICY_LABELS[policy.value] ?? policy.label)
   );
   const leftDisplayLabel = !zh && (state?.left_policy === "human" || mode === "play")
     ? "You"
-    : state?.left_label ?? "League PPO";
+    : state?.left_label ?? "Our AI";
   const leftPalette = state ? paletteFor(state, 0) : RED_PALETTE;
   const rightPalette = state ? paletteFor(state, 1) : BLACK_PALETTE;
 

@@ -1,0 +1,16 @@
+[package]
+name = "tank-rl"
+version = "0.1.0"
+edition = "2021"
+description = "Batched Tank Trouble duels for PPO, as a Python module."
+publish = false
+
+[lib]
+name = "tank_rl"
+crate-type = ["cdylib"]
+
+[dependencies]
+tank-core = { path = "../core" }
+pyo3 = { version = "0.25", features = ["extension-module"] }
+numpy = "0.25"
+rayon = "1"

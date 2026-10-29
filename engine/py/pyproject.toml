@@ -1,0 +1,8 @@
+[build-system]
+requires = ["maturin>=1.5"]
+build-backend = "maturin"
+
+[project]
+name = "tank-rl"
+requires-python = ">=3.10"
+dependencies = ["numpy"]

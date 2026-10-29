@@ -9,64 +9,95 @@ type T = { zh: string; en: string };
 // Every number below is from a pre-registered, seed-paired evaluation; see
 // docs/REPORT.md.
 
-const RESULTS = [
-  { name: "League PPO", sub: { zh: "强化学习 · 网页演示", en: "Reinforcement learning · in the demo" },
-    rate: "95.5%", detail: { zh: "1 万局 · 胜 9553 · 双亡 292 · 负 108 · 平 47", en: "10,000 rounds · 9553 W · 292 double KO · 108 L · 47 draws" },
-    p95: "3.3 ms" },
-  { name: "Tactical", sub: { zh: "实时 MPC 搜索", en: "Real-time MPC search" },
-    rate: "91.0–91.7%", detail: { zh: "三组各 2000 局 · 主要失败是 30 秒僵持", en: "three sets of 2,000 · fails mainly by 30 s stalls" },
-    p95: "9.2 ms" },
+const RESULTS: { name: T; sub: T; rate: string; detail: T; time: T }[] = [
+  { name: { zh: "网络 + 4×4 搜索，跟踪 Laika", en: "Network + 4×4 search, tracking Laika" },
+    sub: { zh: "网页演示，8 核及以上", en: "In the demo, 8+ cores" },
+    rate: "98.92%",
+    detail: { zh: "1 万局 · 胜 9892 · 双亡 32 · 负 27 · 平 49", en: "10,000 rounds · 9892 W · 32 double KO · 27 L · 49 draws" },
+    time: { zh: "浏览器每帧 0.3 ms，危险帧 p50 20 ms（8 个线程）", en: "0.3 ms per frame in the browser, danger frames p50 20 ms (8 threads)" } },
+  { name: { zh: "网络 + 2×2 搜索，跟踪 Laika", en: "Network + 2×2 search, tracking Laika" },
+    sub: { zh: "网页演示，核数更少时", en: "In the demo, fewer cores" },
+    rate: "98.53%",
+    detail: { zh: "1 万局 · 胜 9853 · 双亡 45 · 负 40 · 平 62", en: "10,000 rounds · 9853 W · 45 double KO · 40 L · 62 draws" },
+    time: { zh: "浏览器每帧 0.3 ms，危险帧 p50 23 ms", en: "0.3 ms per frame in the browser, danger frames p50 23 ms" } },
+  { name: { zh: "网络 + 实时搜索", en: "Network + real-time search" },
+    sub: { zh: "Laika 从零重建", en: "Laika rebuilt from scratch" },
+    rate: "97.04%",
+    detail: { zh: "1 万局 · 胜 9704 · 双亡 102 · 负 122 · 平 72", en: "10,000 rounds · 9704 W · 102 double KO · 122 L · 72 draws" },
+    time: { zh: "浏览器每帧 0.3 ms，危险帧 p50 25 ms", en: "0.3 ms per frame in the browser, danger frames p50 25 ms" } },
+  { name: { zh: "仅网络", en: "Network alone" },
+    sub: { zh: "230 维观测", en: "230-value observation" },
+    rate: "96.67%",
+    detail: { zh: "1 万局 · 胜 9667 · 双亡 112 · 负 170 · 平 51", en: "10,000 rounds · 9667 W · 112 double KO · 170 L · 51 draws" },
+    time: { zh: "浏览器每帧 0.3 ms", en: "0.3 ms per frame in the browser" } },
 ];
 
 const PIPELINE: { title: T; stat: string; body: T }[] = [
   {
-    title: { zh: "Tactical：实时 MPC 搜索", en: "Tactical: real-time MPC search" },
-    stat: "91.5%",
+    title: { zh: "观测：230 个可见事实", en: "Observation: 230 visible facts" },
+    stat: "230",
     body: {
-      zh: "每帧把候选动作复制到沙盒里前推 36 帧，Laika 用它自己的脚本从空状态重新跑（不读隐藏状态）。按接近可命中位置、弹道是否命中和暴露程度打分；子弹安全搜索否决会死的移动，结算审计否决会导致双亡的开火，僵持时拓扑追击。",
-      en: "Each frame, candidate actions are rolled 36 frames forward in a sandbox with Laika re-run from a fresh state (no hidden state is read). Scored by progress toward firing positions, verified hits and exposure; a bullet-safety search vetoes moves that die, a settlement audit vetoes shots that end in a double KO, and a topological chase breaks stalls.",
+      zh: "只用玩家能从屏幕上读出的事实：周围 5×5 格的墙、双方坦克、每颗子弹的弹道预测、Laika 自己的瞄准模型、每个移动方向的 24 帧生存前瞻（含 Laika 即将打出的那一枪），以及通往对手的路线和每一枪离对手最近能擦过多远。由消融实验逐组确定。",
+      en: "Only facts a player could read off the screen: the walls of the 5×5 cells around, both tanks, every bullet's forecast, Laika's own aiming model, a 24-frame survival lookahead for each move (including the shot Laika is about to take), the route to the opponent and how near each shot passes. Settled group by group by ablation.",
     },
   },
   {
-    title: { zh: "League PPO：联赛自博弈", en: "League PPO: league self-play" },
-    stat: "93.9%",
+    title: { zh: "联赛 PPO", en: "League PPO" },
+    stat: "96.0%",
     body: {
-      zh: "网络每帧读取 1030 个可见事实，输出 18 个动作。只在一局结束时给奖励（胜 +1、双亡 −0.1、负或平 −1）。对手池：10% Laika、10% Tactical、80% 自己的历史版本。推理时加安全护盾：去掉会被打死的移动和会打到自己的开火。",
-      en: "The network reads 1030 visible facts per frame and outputs 18 actions. Reward only at the end of a round (win +1, double KO −0.1, loss or draw −1). Opponents: 10% Laika, 10% Tactical, 80% its own past versions. At inference a safety shield removes moves that die and shots that hit the shooter.",
+      zh: "Rust 环境里 512 局并行，约 1 万步/秒。对手 20% Laika、80% 自己最近 8 个历史版本。只在一局结束时给奖励：胜 +1，负或平 −1，双亡 −0.5。先训 3000 万步，再以学习率 1e-4、γ 0.9997 续训 6000 万步。推理时安全护盾去掉会被打死的移动和会打到自己的开火。",
+      en: "512 rounds in parallel in Rust, about 10,000 steps/s. Opponents: 20% Laika, 80% its last eight frozen versions. Reward only at the end: win +1, loss or draw −1, double KO −0.5. 30M steps, then 60M more at learning rate 1e-4 and γ 0.9997. At inference a safety shield removes moves that die and shots that hit the shooter.",
     },
   },
   {
     title: { zh: "MPC 老师", en: "MPC teacher" },
-    stat: "+1.8pp",
+    stat: "+0.67pp",
     body: {
-      zh: "失败多发生在死前约 1 秒的关键选择上。危险时刻（约 1/7 的帧），把网络最想做的几个动作交给网络自己在沙盒里各演 24 帧，选结局最好的。更强，但每次决策 0.2–0.6 秒，跑不了实时。",
-      en: "Most failures are decided about a second before they happen. In danger (about one frame in seven) the network's top actions are each played out 24 frames by the network itself in a sandbox and the best is taken. Stronger, but 0.2–0.6 s per decision: too slow for real time.",
+      zh: "危险时（约 1/4 的帧），把网络最想做的几个动作放进公平沙盒（Laika 从头重建、独立随机数）各推演 24 帧。在 6000 局、37 万个危险帧上打分，目标是 π·exp(16·得分)；再训 2000 万步 PPO，每个小批次都加上向老师靠拢的 KL 损失。比同样步数的单纯续训高 0.67 个百分点。",
+      en: "In danger (about a quarter of frames) the network's top actions are each played out 24 frames in a fair sandbox (Laika rebuilt from scratch, an independent random stream). Scored on 372,779 danger frames from 6,000 rounds; the target is π·exp(16·score); 20M more PPO steps add a KL pull toward it to every minibatch. +0.67pp over the same steps without it.",
     },
   },
   {
-    title: { zh: "蒸馏（专家迭代）", en: "Distillation (expert iteration)" },
-    stat: "95.5%",
+    title: { zh: "实时搜索", en: "Real-time search" },
+    stat: "97.04%",
     body: {
-      zh: "网络自己打 2000 局，在它遇到的 16.3 万个危险帧上请老师给候选动作打分；把网络原来的动作分布按 exp(16·得分) 向老师倾斜，再训练网络拟合。网络结构和每帧耗时不变，真胜率 +1.6pp。",
-      en: "The network plays 2,000 rounds; on its 163,086 danger frames the teacher scores its candidate actions. The network's own distribution, tilted by exp(16·score), becomes the target. Same network and per-frame cost, +1.6pp true wins.",
+      zh: "对战时，危险帧上用同一个搜索（2 个候选 × 2 次推演），30 ms 预算内先评网络采样的动作、再评其他候选，只有严格更好才替换；超时就用网络的动作。Rust 编译成 WebAssembly，在浏览器的 Web Worker 里跑。",
+      en: "In play, danger frames run the same search (2 candidates × 2 rollouts) under a 30 ms budget: the network's sampled action first, then the others, replaced only by a strictly better one; out of time, the network's action stands. Rust compiled to WebAssembly, in a Web Worker.",
+    },
+  },
+  {
+    title: { zh: "跟踪 Laika", en: "Tracking Laika" },
+    stat: "98.53%",
+    body: {
+      zh: "作弊诊断：让搜索里的 Laika 复制真 Laika 的记忆（目标、排队中的动作、计时器），开发集从 97.33% 升到 98.72%；再复制随机数也不再提高。记忆看不见，但动作看得见：16 个 Laika 副本逐帧重放，只留下坦克移动和开火与真 Laika 一致的，搜索就和它们对推。99.95% 的帧里至少有一个副本与真实状态完全一致，每帧多花约 0.1 ms。",
+      en: "A cheating diagnostic: giving the search a copy of the real Laika's memory (goal, queued actions, timers) lifts development seeds from 97.33% to 98.72%; its random stream adds nothing more. Its memory is hidden but its moves are not: sixteen Laika copies replay every frame, those whose tank moved and fired as the real one did survive, and the search plays them. A copy holds the exact state on 99.95% of frames, for about 0.1 ms per frame.",
+    },
+  },
+  {
+    title: { zh: "多线程加宽搜索", en: "A wider search, in parallel" },
+    stat: "98.92%",
+    body: {
+      zh: "Laika 对了，算力就有用：4 个候选 × 4 次推演在开发集上比 2×2 高 0.34 个百分点，留出集 98.92%，被打死从 40 局降到 27 局。最多 20 次推演一个线程 30 ms 算不完，于是分给最多 8 个 Web Worker：每个辅助线程持有一份棋局副本，重放每条命令和每帧动作并核对状态指纹；超时 5 ms 的算未完成，副本不同步就退回单线程 2×2。推演本身也提速到 2.9 ms，结果逐位不变。",
+      en: "Once the search's Laika is right, compute pays: 4 candidates × 4 rollouts beat 2×2 by 0.34pp on development seeds and reach 98.92% held out, losses down from 40 to 27. Up to 20 rollouts do not fit one thread's 30 ms, so they are shared among up to eight Web Workers, each helper holding a copy of the arena that replays every command and every frame's moves and checks a fingerprint of the state; an answer 5 ms late counts as unplayed, and a copy that drifts drops the search to one worker and 2×2. The rollout itself got faster too, 2.9 ms, bit for bit the same.",
     },
   },
 ];
 
 const PAIRED: { label: T; d: number; lo: number; hi: number; n: string; ok: boolean }[] = [
-  { label: { zh: "PPO − Tactical（第 1 组）", en: "PPO − Tactical (set 1)" }, d: 2.85, lo: 1.22, hi: 4.48, n: "2,000", ok: true },
-  { label: { zh: "PPO − Tactical（第 2 组）", en: "PPO − Tactical (set 2)" }, d: 2.10, lo: 0.43, hi: 3.77, n: "2,000", ok: true },
-  { label: { zh: "PPO − Tactical（第 3 组）", en: "PPO − Tactical (set 3)" }, d: 3.65, lo: 2.12, hi: 5.18, n: "2,000", ok: true },
-  { label: { zh: "MPC 老师 − PPO", en: "MPC teacher − PPO" }, d: 1.80, lo: 0.49, hi: 3.11, n: "2,000", ok: true },
-  { label: { zh: "蒸馏后 − 蒸馏前（2000 局）", en: "Distilled − PPO (2,000)" }, d: 0.65, lo: -0.55, hi: 1.85, n: "2,000", ok: false },
-  { label: { zh: "蒸馏后 − 蒸馏前（1 万局）", en: "Distilled − PPO (10,000)" }, d: 1.59, lo: 1.02, hi: 2.16, n: "10,000", ok: true },
+  { label: { zh: "长训练网络 − 上一版", en: "Long-trained − previous" }, d: 0.66, lo: 0.15, hi: 1.17, n: "10,000", ok: true },
+  { label: { zh: "老师指导 − 单纯续训", en: "With teacher − plain PPO" }, d: 0.67, lo: 0.16, hi: 1.18, n: "10,000", ok: true },
+  { label: { zh: "网络 − 上一版", en: "Network − previous" }, d: 0.73, lo: 0.21, hi: 1.25, n: "10,000", ok: true },
+  { label: { zh: "网络 + 搜索 − 上一版", en: "Network + search − previous" }, d: 1.10, lo: 0.59, hi: 1.61, n: "10,000", ok: true },
+  { label: { zh: "网络 + 搜索 − 网络", en: "Network + search − network" }, d: 0.37, lo: -0.11, hi: 0.85, n: "10,000", ok: false },
+  { label: { zh: "跟踪 Laika − 从零重建", en: "Tracked Laika − fresh Laika" }, d: 1.49, lo: 1.18, hi: 1.80, n: "10,000", ok: true },
+  { label: { zh: "4×4 − 2×2，都跟踪 Laika", en: "4×4 − 2×2, both tracking" }, d: 0.39, lo: 0.09, hi: 0.69, n: "10,000", ok: true },
 ];
 
-const BETA = [
-  { x: "PPO", v: 93.55 }, { x: "β 4", v: 94.45 }, { x: "β 8", v: 95.25 },
-  { x: "β 16", v: 96.70 }, { x: "β 32", v: 96.30 },
+const SEEDS: { label: T; runs: number[] }[] = [
+  { label: { zh: "1030 维 · 3000 万步", en: "1030 values · 30M" }, runs: [92.7, 91.8, 79.5] },
+  { label: { zh: "230 维 · 3000 万步", en: "230 values · 30M" }, runs: [90.1, 74.2, 86.2] },
+  { label: { zh: "230 维 · 续训 6000 万步", en: "230 values · +60M" }, runs: [91.6, 96.0] },
 ];
-const SHUFFLED = 94.90;
 
 const DEPTHS = [8, 16, 32, 64, 128];
 const HEADROOM = {
@@ -75,25 +106,26 @@ const HEADROOM = {
 };
 
 const OBS: { name: T; dims: number; body: T }[] = [
-  { name: { zh: "迷宫栅格", en: "Maze grid" }, dims: 840, body: { zh: "12×10 格 × {存在、4 面墙、我在此、对手在此}", en: "12×10 cells × {exists, 4 walls, me here, opponent here}" } },
-  { name: { zh: "墙体射线", en: "Wall rays" }, dims: 16, body: { zh: "车体四周 16 个方向到最近墙的距离", en: "distance to the nearest wall in 16 directions" } },
-  { name: { zh: "双方状态", en: "Both tanks" }, dims: 24, body: { zh: "位置、朝向、速度、转速、弹药、能否开火、是否贴墙；对手换算到我的坐标系", en: "pose, velocity, turn rate, ammo, readiness, wall contact; the opponent in my frame" } },
-  { name: { zh: "导航", en: "Navigation" }, dims: 10, body: { zh: "BFS 路径长度、下一步方向、直线方位、死路深度", en: "BFS path length, next step direction, bearing, dead-end depth" } },
-  { name: { zh: "双方瞄准", en: "Aim, both" }, dims: 10, body: { zh: "当前炮口这一枪：打中对手 / 打中自己 / 落空，命中时间，最近擦过距离", en: "the current barrel's shot: hit / self-hit / miss, time to hit, closest pass" } },
-  { name: { zh: "逐发子弹", en: "Bullets" }, dims: 100, body: { zh: "每颗子弹的位置、速度、归属、是否反弹过、寿命，以及 75 帧内会不会打中谁、何时", en: "each bullet's position, velocity, owner, bounced, lifetime, and whether and when it reaches either tank within 75 frames" } },
-  { name: { zh: "威胁与阶段", en: "Threat and phase" }, dims: 8, body: { zh: "最紧迫的来弹、瞄准我的子弹数，回合阶段与时间", en: "most urgent incoming bullet, bullets on course to me, round phase and clock" } },
-  { name: { zh: "最近动作", en: "Recent actions" }, dims: 11, body: { zh: "最近 3 个动作、动作变更率、连续原地帧数", en: "last three actions, action-change rate, idle streak" } },
-  { name: { zh: "躲避前瞻", en: "dodge_safety" }, dims: 9, body: { zh: "9 个移动方向各保持 24 帧会不会被打中——最重要的一组输入，网页“AI 视角”里的 3×3 方块就是它", en: "for each of nine moves, does holding it for 24 frames survive — the most important input; the 3×3 grid in the arena's AI view" } },
-  { name: { zh: "先手", en: "First strike" }, dims: 2, body: { zh: "双方各需原地转几帧才能瞄准命中对方", en: "frames each side must turn before its shot hits the other" } },
+  { name: { zh: "自身", en: "Self" }, dims: 8, body: { zh: "弹药、能否开火、朝向、自身坐标系里的速度、转速、是否贴墙", en: "ammo, ready to fire, heading, velocity in my frame, turn rate, wall contact" } },
+  { name: { zh: "局部墙", en: "Local walls" }, dims: 62, body: { zh: "我周围 5×5 格的每条墙边，以及我在格内的位置", en: "every wall edge of the 5×5 cells around me, and my offset in my cell" } },
+  { name: { zh: "对手", en: "Opponent" }, dims: 13, body: { zh: "我坐标系里的位置和距离、迷宫距离、朝它走的下一格、有无视线、它的炮口对我的角度、接近速度", en: "position and distance in my frame, maze distance, next cell toward it, line of sight, its barrel against my bearing, closing speed" } },
+  { name: { zh: "炮管", en: "Barrels" }, dims: 6, body: { zh: "双方现在开火会打中对手还是自己、几帧后——用引擎自己的子弹子步计算", en: "would each barrel's shot now hit the opponent or the shooter, and when — with the engine's own bullet substeps" } },
+  { name: { zh: "Laika 的意图", en: "Laika's intent" }, dims: 7, body: { zh: "按它自己的瞄准模型它是否马上开火；双方各要转几帧才能瞄中；是否在它 7 格追击、2 格必开火的范围内；它上次开火多久了；它的弹药", en: "its own aiming model says it is about to fire; frames each side must turn to hold a hit; inside its 7-cell hunting and 2-cell firing range; time since its last shot; its ammo" } },
+  { name: { zh: "逐发子弹", en: "Bullets" }, dims: 100, body: { zh: "每颗子弹按紧迫程度排序：位置、方向、归属、是否反弹过、寿命、会不会打中我和何时、最近擦过距离", en: "each bullet, most urgent first: position, direction, owner, bounced, lifetime, forecast hit on me and when, closest pass" } },
+  { name: { zh: "生存前瞻", en: "Survival" }, dims: 9, body: { zh: "9 个移动方向各保持 24 帧会不会被打中，包括 Laika 即将打出的那一枪——网页“AI 视角”里的 3×3 方块就是它", en: "for each of nine moves, does holding it 24 frames survive, the shot Laika is about to take included — the 3×3 grid in the arena's AI view" } },
+  { name: { zh: "时间", en: "Time" }, dims: 6, body: { zh: "回合时钟、是否结算中、上一个动作、我上次开火多久了", en: "round clock, settlement, last action, time since my last shot" } },
+  { name: { zh: "战术", en: "Tactics" }, dims: 19, body: { zh: "游戏自带的最短路线（下一个路口方向、还要转多少）、双方格子的出口数、每一枪离对手最近擦过多远、左右各转 3 帧后会不会更近、子弹威胁汇总、当前动作保持了多久", en: "the game's own shortest route (next waypoint, how far to turn), exits of both cells, how near each shot passes and whether turning three frames either way passes nearer, the bullets' summed threat, how long the current move has been held" } },
 ];
 
 const NEGATIVE: { idea: T; result: T }[] = [
-  { idea: { zh: "训练从 3000 万步加到 1 亿步", en: "Training from 30M to 100M steps" }, result: { zh: "93.60% → 93.05%", en: "93.60% → 93.05%" } },
-  { idea: { zh: "双亡惩罚从 −0.1 加到 −0.6", en: "Double-KO price −0.1 → −0.6" }, result: { zh: "无差别", en: "no difference" } },
-  { idea: { zh: "深度护盾（沙盒预演后否决）", en: "Deep shield (veto after a sandbox rollout)" }, result: { zh: "不如普通护盾", en: "no gain over the plain shield" } },
-  { idea: { zh: "对峙时交给 Tactical", en: "Hand face-offs to Tactical" }, result: { zh: "双亡变少、输变多，净胜不变", en: "fewer double KOs, more losses, no net gain" } },
-  { idea: { zh: "先手特征（3 种子匹配消融）", en: "First-strike features (3-seed matched ablation)" }, result: { zh: "续训更稳，但不比起点强", en: "steadier fine-tuning, no gain" } },
-  { idea: { zh: "第二轮蒸馏", en: "A second distillation round" }, result: { zh: "无增益：学生已追上老师", en: "no gain: the student caught up with the teacher" } },
+  { idea: { zh: "用单次 3000 万步训练比较观测", en: "Comparing observations on single 30M runs" }, result: { zh: "种子波动（79–93%）比差别还大", en: "the seed spread (79–93%) exceeds the differences" } },
+  { idea: { zh: "平局惩罚从 −1 加到 −2", en: "Draw priced at −2 instead of −1" }, result: { zh: "平局变少、输变多，胜率不变（3 种子）", en: "fewer draws, more losses, same win rate (3 seeds)" } },
+  { idea: { zh: "一半对局打 Laika（原为 1/5）", en: "Half the rounds against Laika (was a fifth)" }, result: { zh: "均值不变，波动更大（3 种子）", en: "same mean, wider spread (3 seeds)" } },
+  { idea: { zh: "用价值网络给未分胜负的推演打分", en: "Scoring undecided rollouts by the critic" }, result: { zh: "学生一样，标注慢 2.5 倍", en: "same student, labelling 2.5× slower" } },
+  { idea: { zh: "更宽的实时搜索（3×3），Laika 从零重建", en: "A wider real-time search (3×3), Laika rebuilt from scratch" }, result: { zh: "不比 2×2 强，慢一倍", en: "no stronger than 2×2, twice as slow" } },
+  { idea: { zh: "更强的搜索（4×8、32 帧），Laika 从零重建", en: "A stronger search (4×8, 32 frames), Laika rebuilt from scratch" }, result: { zh: "+0.35，不显著（6000 局）——缺的是对 Laika 的了解，不是算力", en: "+0.35pp, not significant (6,000 rounds) — what was missing was knowledge of Laika, not compute" } },
+  { idea: { zh: "第二轮专家迭代", en: "A second round of expert iteration" }, result: { zh: "持平", en: "no change" } },
+  { idea: { zh: "网络加宽到 512", en: "A 512-unit network" }, result: { zh: "训练更稳，最终持平；加搜索后 −0.62", en: "steadier training, same end point; −0.62pp with search" } },
 ];
 
 // ---------------------------------------------------------------- charts
@@ -102,7 +134,7 @@ function PairedChart({ zh }: { zh: boolean }) {
   const [hover, setHover] = useState<number | null>(null);
   const w = 720;
   const row = 36;
-  const labelW = 230;
+  const labelW = 250;
   const x = (v: number) => labelW + ((v + 1) / 7) * (w - labelW - 20);
   const h = PAIRED.length * row + 34;
   return (
@@ -133,41 +165,45 @@ function PairedChart({ zh }: { zh: boolean }) {
         })}
       </svg>
       <p className="caption">{zh
-        ? "按种子配对的胜率差（百分点）与 95% 置信区间。区间不跨 0 即显著；灰色那条说明 2000 局分辨不出 1.6pp，需要 1 万局。"
-        : "Seed-paired win-rate differences (points) with 95% CIs. An interval clear of 0 is significant; the grey one shows 2,000 rounds cannot resolve 1.6pp — 10,000 can."}</p>
+        ? "按种子配对的胜率差（百分点）与 95% 置信区间，各 1 万局。区间不跨 0 即显著；灰色那条是实时搜索在网络之上的增益，这次没测出显著差别。"
+        : "Seed-paired win-rate differences (points) with 95% CIs, 10,000 rounds each. An interval clear of 0 is significant; the grey one, the search's gain over the network alone, was not resolved."}</p>
     </div>
   );
 }
 
-function BetaChart({ zh }: { zh: boolean }) {
-  const [hover, setHover] = useState<number | null>(null);
-  const w = 520;
+function SeedChart({ zh }: { zh: boolean }) {
+  const [hover, setHover] = useState<string | null>(null);
+  const w = 560;
   const h = 260;
-  const x = (i: number) => 60 + i * ((w - 100) / (BETA.length - 1));
-  const y = (v: number) => 20 + ((97.2 - v) / 4.2) * (h - 60);
+  const x = (i: number) => 110 + i * ((w - 230) / (SEEDS.length - 1));
+  const y = (v: number) => 20 + ((100 - v) / 30) * (h - 60);
   return (
     <div className="chart">
-      <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label={zh ? "蒸馏温度" : "Distillation beta"}>
-        {[93, 94, 95, 96, 97].map((v) => (
+      <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label={zh ? "种子波动" : "Seed spread"}>
+        {[70, 80, 90, 100].map((v) => (
           <g key={v}>
             <line x1={50} x2={w - 20} y1={y(v)} y2={y(v)} className="grid" />
             <text x={42} y={y(v) + 4} className="tick" textAnchor="end">{v}%</text>
           </g>
         ))}
-        <polyline points={BETA.map((b, i) => `${x(i)},${y(b.v)}`).join(" ")} className="line" />
-        {BETA.map((b, i) => (
-          <g key={b.x} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
-            <circle cx={x(i)} cy={y(b.v)} r={hover === i ? 8 : 6} className="dot" />
-            <text x={x(i)} y={h - 16} className="tick" textAnchor="middle">{b.x}</text>
-            {hover === i && <text x={x(i)} y={y(b.v) - 14} className="value" textAnchor="middle">{b.v.toFixed(2)}%</text>}
+        {SEEDS.map((g, i) => (
+          <g key={i}>
+            <text x={x(i)} y={h - 16} className="tick" textAnchor="middle">{g.label[zh ? "zh" : "en"]}</text>
+            {g.runs.map((v, k) => {
+              const id = `${i}-${k}`;
+              return (
+                <g key={id} onMouseEnter={() => setHover(id)} onMouseLeave={() => setHover(null)}>
+                  <circle cx={x(i) + (k - (g.runs.length - 1) / 2) * 16} cy={y(v)} r={hover === id ? 8 : 6} className="dot" />
+                  {hover === id && <text x={x(i) + 14} y={y(v) - 10} className="value">{v.toFixed(1)}%</text>}
+                </g>
+              );
+            })}
           </g>
         ))}
-        <rect x={x(3) - 6} y={y(SHUFFLED) - 6} width={12} height={12} className="dot muted" transform={`rotate(45 ${x(3)} ${y(SHUFFLED)})`} />
-        <text x={x(3) + 12} y={y(SHUFFLED) + 4} className="value">{zh ? `打乱老师打分 ${SHUFFLED}%` : `teacher scores shuffled ${SHUFFLED}%`}</text>
       </svg>
       <p className="caption">{zh
-        ? "开发种子上不同 β 的胜率（各 2000 局）。打乱老师打分的对照只涨一部分：提升主要来自老师的选择，而不只是采样更集中。"
-        : "Win rate on development seeds for each β (2,000 rounds each). The shuffled-teacher control gains only part of it: most of the gain is the teacher's choice, not just sharper sampling."}</p>
+        ? "同一配置换训练种子，3000 万步时可能差 15 个百分点：有的种子困在自对弈的 30 秒平局里。所以只看长训练后、在从未用过的种子上配对测 1 万局的结果。"
+        : "The same configuration on different training seeds can differ by 15 points at 30M steps: some seeds stay stuck in self-play 30 s draws. Hence long training, and only 10,000-round paired tests on never-used seeds."}</p>
     </div>
   );
 }
@@ -234,8 +270,8 @@ export function Report() {
   const language = useLanguage();
   const zh = language === "zh";
   const t = (text: T) => text[language];
-  const [step, setStep] = useState(3);
-  const [block, setBlock] = useState(8);
+  const [step, setStep] = useState(5);
+  const [block, setBlock] = useState(6);
   const total = OBS.reduce((sum, b) => sum + b.dims, 0);
 
   return (
@@ -253,18 +289,18 @@ export function Report() {
       <header className="report-head">
         <h1>{zh ? "方法与结果" : "Method and results"}</h1>
         <p>{zh
-          ? "两个 AI 对战 Tank Trouble 原版 AI Laika。真胜率：先击杀、随后被仍在飞行的子弹打死算双亡，不算胜；30 秒未分胜负算平局。所有测试都预注册、在从未用过的种子上按局配对。"
-          : "Two AIs play Tank Trouble's original AI, Laika. True win rate: a kill followed by death to a bullet still in flight is a double KO, not a win; a round undecided after 30 s is a draw. Every test is pre-registered and seed-paired on never-used seeds."}</p>
+          ? "我们的 AI 对战 Tank Trouble 原版 AI Laika。真胜率：先击杀、随后被仍在飞行的子弹打死算双亡，不算胜；30 秒未分胜负算平局。所有测试都预注册、在训练和调参都没用过的种子上按局配对。与公开项目 KillField 的规划器正面对战 1000 局：583 胜 201 负。"
+          : "Our AI plays Tank Trouble's original AI, Laika. True win rate: a kill followed by death to a bullet still in flight is a double KO, not a win; a round undecided after 30 s is a draw. Every test is pre-registered and seed-paired on seeds never used for training or tuning. Head to head against KillField's planner, a public Tank Trouble AI: 583 wins to 201 over 1,000 rounds."}</p>
       </header>
 
       <section className="cards">
         {RESULTS.map((r) => (
-          <div key={r.name} className="card">
+          <div key={r.rate} className="card">
             <span>{t(r.sub)}</span>
-            <strong>{r.name}</strong>
+            <strong>{t(r.name)}</strong>
             <b>{r.rate}</b>
             <small>{t(r.detail)}</small>
-            <small>{zh ? `每帧决策 p95 ${r.p95}` : `decision p95 ${r.p95}`}</small>
+            <small>{t(r.time)}</small>
           </div>
         ))}
       </section>
@@ -294,8 +330,8 @@ export function Report() {
           <HeadroomChart zh={zh} />
         </div>
         <div>
-          <h2>{zh ? "蒸馏：向老师倾斜多少" : "Distillation: how far to tilt"}</h2>
-          <BetaChart zh={zh} />
+          <h2>{zh ? "为什么要长训练" : "Why train long"}</h2>
+          <SeedChart zh={zh} />
         </div>
       </section>
 
@@ -327,7 +363,6 @@ export function Report() {
 
       <footer className="report-foot">
         <a href="https://github.com/Mingjie-Mao/tank-trouble" target="_blank" rel="noreferrer">GitHub ↗</a>
-        <span>{zh ? "观测、奖励与规划器基础来自 KillField（MIT）" : "Observation, reward and planner build on KillField (MIT)"}</span>
       </footer>
     </main>
   );

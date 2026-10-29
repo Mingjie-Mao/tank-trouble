@@ -18,7 +18,7 @@ test("server-renders the Tank Trouble arena shell", async () => {
   const html = await response.text();
   assert.match(html, /<title>Tank Trouble AI Arena<\/title>/i);
   assert.match(html, /tank trouble ai/i);
-  assert.match(html, /League PPO/i);
+  assert.match(html, /Laika/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
 });
 
@@ -34,5 +34,5 @@ test("server-renders the report page", async () => {
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /方法与结果/);
-  assert.match(html, /95\.5%/);
+  assert.match(html, /98\.53%/);
 });

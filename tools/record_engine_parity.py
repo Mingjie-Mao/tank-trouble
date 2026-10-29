@@ -1,24 +1,22 @@
 #!/usr/bin/env python3
-"""Record the Python port frame by frame for the JS engine parity test.
+"""Record the Python port frame by frame for the Rust engine parity test.
 
-The JS engine (`web/lib/engine/`) is a translation of `tank_trouble_original/`.
+The Rust engine (`engine/core/`) is a translation of `tank_trouble_original/`.
 This script plays fixed seeds with tank 1 under Laika and tank 0 under a
 scripted input stream both languages reproduce exactly. Per frame it writes:
 
 * a SHA-1 over every discrete part of the state — round and settlement
   counters, scores, crate timer, each tank's alive flag, ammo, trigger, wall
   contact and buttons, each bullet's name, owner, lifetime and bounce
-  flag, and every event — which the JS engine must match exactly;
+  flag, and every event — which the Rust engine must match exactly;
 * every continuous part — tank poses, bullet positions and velocities —
-  rounded to 1e-6, which the JS engine must match within 1e-6.
+  rounded to 1e-6, which the Rust engine must match within 1e-6.
 
-Floats are not compared bit for bit because Python's `math.sin`/`math.cos`
-come from the platform libm and V8 ships its own: the two differ in the last
-bit for some angles, so exact equality holds on some seeds and not others.
-Measured over these seeds the difference never exceeds ~6e-14 and never
-changes a discrete outcome.
+Floats are not compared bit for bit: Python's `math.sin`/`math.cos` come from
+the platform libm and can differ from Rust's in the last bit for some angles.
+The difference stays around 1e-14 and never changes a discrete outcome.
 
-    python3 tools/record_engine_parity.py   # writes web/tests/fixtures/engine-parity.json.gz
+    python3 tools/record_engine_parity.py   # writes engine/core/tests/fixtures/engine-parity.json.gz
 """
 
 import gzip
@@ -33,7 +31,7 @@ from tank_trouble_original import Game  # noqa: E402
 
 SEEDS = [1, 7, 42, 970000, 970123, 990000, 2024, 31337, 123456789, 4000000, 2**33 + 5, 0]
 FRAMES = 2500
-OUT = ROOT / "web" / "tests" / "fixtures" / "engine-parity.json.gz"
+OUT = ROOT / "engine" / "core" / "tests" / "fixtures" / "engine-parity.json.gz"
 
 
 class Driver:

@@ -3,7 +3,7 @@ import { Report } from "./Report";
 
 export const metadata: Metadata = {
   title: "Tank Trouble AI — Report",
-  description: "League PPO 与 Tactical 的方法与结果：联赛自博弈、安全护盾、MPC 老师与蒸馏。",
+  description: "方法与结果：自己设计的观测、联赛 PPO、MPC 老师与实时搜索。",
 };
 
 export default function ReportPage() {

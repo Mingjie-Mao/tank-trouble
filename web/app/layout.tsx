@@ -18,13 +18,13 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     openGraph: {
       title: "Tank Trouble AI Arena",
-      description: "强化学习 AI 对战原版 Laika，95.5% 真胜率，全部在浏览器内运行。",
+      description: "强化学习 AI 对战原版 Laika，98.9% 真胜率，全部在浏览器内运行。",
       images: [{ url: socialImage, width: 1536, height: 864 }],
     },
     twitter: {
       card: "summary_large_image",
       title: "Tank Trouble AI Arena",
-      description: "强化学习 AI 对战原版 Laika，95.5% 真胜率，全部在浏览器内运行。",
+      description: "强化学习 AI 对战原版 Laika，98.9% 真胜率，全部在浏览器内运行。",
       images: [socialImage],
     },
   };

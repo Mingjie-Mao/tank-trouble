@@ -7,11 +7,13 @@ venv/
 # Original Flash assets (binary; the decompiled source is in swf_decompiled/).
 tank-trouble_flash/
 
-# training/ tracks only the league PPO trainer. Checkpoints, logs, teacher
-# labels and evaluation output (training/runs/) and older local datasets stay
-# on the machine.
+# training/ tracks only the trainer. Checkpoints, logs, teacher labels and
+# evaluation output (training/runs/) stay on the machine.
 training/*
-!training/js_league_ppo.py
+!training/ppo.py
+
+# Rust build output.
+engine/target/
 
 # Browser arena run output.
 web/data/

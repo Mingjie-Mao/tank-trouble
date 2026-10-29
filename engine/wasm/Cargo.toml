@@ -1,0 +1,14 @@
+[package]
+name = "tank-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "The web demo's arena: engine, Laika and the deployed controller, compiled to WebAssembly."
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+tank-core = { path = "../core" }
+serde_json = "1"
+wasm-bindgen = "0.2"

@@ -2,24 +2,29 @@
 
 # Tank Trouble AI
 
-AI for the classic Flash game **Tank Trouble**, playing the game's own AI, Laika: a real-time MPC search, and a reinforcement-learning policy distilled from an MPC teacher.
+An AI for the classic Flash game **Tank Trouble** that beats the game's own AI, Laika, 98.9% of the time: a reinforcement-learning policy on an observation of our own design, taught by an MPC search and backed by the same search in real time, which plays against copies of Laika kept in step with what it visibly does. Everything runs in the browser, compiled from Rust to WebAssembly.
 
 Live demo: [https://tank-trouble-ai.pages.dev/](https://tank-trouble-ai.pages.dev/)
 
 ## Results
 
-| Agent | Method | True win rate vs Laika | Decision time (p95) |
-|---|---|---:|---:|
-| **League PPO** (in the demo) | PPO self-play + safety shield, distilled from an MPC teacher | **95.5%** | 3.3 ms |
-| Tactical | Real-time MPC search | 91.0–91.7% | 9.2 ms |
+| Agent | True win rate vs Laika | Decision time (browser) |
+|---|---:|---|
+| **Network + 4×4 real-time search, tracking Laika** (in the demo, 8+ cores) | **98.92%** | 0.3 ms; danger frames p50 20 ms, max 32 ms |
+| Network + 2×2 real-time search, tracking Laika (in the demo, fewer cores) | 98.53% | 0.3 ms; danger frames 23 ms |
+| Network + real-time search against a fresh Laika | 97.04% | 0.3 ms; danger frames p50 25 ms |
+| Network alone (230-value observation) | 96.67% | 0.3 ms |
+| Previous network (1030-value observation) | 95.94% | — |
 
-Pre-registered tests on never-used seeds: 10,000 rounds for League PPO, three sets of 2,000 for Tactical. A kill followed by death to a bullet still in flight is a double KO, not a win; a round undecided after 30 s is a draw.
+10,000 rounds on held-out seeds, pre-registered and paired by seed: tracking Laika adds +1.49 points, 95% CI [+1.18, +1.80]; the wider search +0.39 [+0.09, +0.69] more; +2.98 [+2.54, +3.42] over the previous network. A kill followed by death to a bullet still in flight is a double KO, not a win; a round undecided after 30 s is a draw. Head to head against KillField's planner, a public Tank Trouble AI: 583 wins to 201 over 1,000 rounds.
 
 ## How it works
 
-- **Engine**: Python and JavaScript ports of the decompiled Flash game, following its original frame order, checked against each other frame by frame.
-- **Tactical**: every frame, rolls candidate actions 36 frames forward in a sandbox, vetoes moves and shots that die, and chases when stalled.
-- **League PPO**: trained in PyTorch against Laika, Tactical and its own past versions, on visible facts only, with a safety shield over its actions. An MPC teacher that plays out its top actions is then distilled back into the network by expert iteration: 1.6 points more wins at the same per-frame cost.
+- **Engine**: Python and Rust ports of the decompiled Flash game in its original frame order, checked against each other frame by frame.
+- **Observation**: 230 facts a player could read off the screen — local walls, both tanks, every bullet's forecast, Laika's own aiming model, a survival lookahead for each move, the route to the opponent and how near each shot passes.
+- **Training**: league PPO in PyTorch against Laika and the policy's own past versions, with Rust environments at ~10,000 steps/s and a safety shield over the actions.
+- **Teacher and search**: in danger, the policy's top actions are played out 24 frames in a fair sandbox; the scores train the network and, with a 30 ms budget, pick its moves in play — in the browser 4 candidates × 4 rollouts shared among up to eight Web Workers, each holding a copy of the game in step.
+- **Reading Laika**: Laika's goal and queued actions are hidden, but its moves are not. Sixteen copies of Laika replay every frame and only those that moved as the real one did survive; the search plays them instead of a Laika rebuilt from scratch.
 
 Details: [method and results](docs/REPORT.md) · [engine](docs/ENGINE.md)
 
@@ -27,14 +32,15 @@ Details: [method and results](docs/REPORT.md) · [engine](docs/ENGINE.md)
 
 | Path | Contents |
 |---|---|
+| `engine/core/` | Rust engine, Laika, observation, search and the playing agent |
+| `engine/py/`, `training/ppo.py` | Python bindings; PPO training, teacher labels, evaluation and export |
+| `engine/wasm/`, `web/` | The browser arena (WebAssembly in a Web Worker, React UI) |
 | `tank_trouble_original/` | Python port of the game and Laika |
-| `web/` | Browser arena; `web/lib/engine/` JS engine; `web/rl/` RL environment, agents and evaluator |
-| `training/js_league_ppo.py` | PPO training, evaluation, distillation and export |
 | `swf_decompiled/` | Decompiled Flash source |
 
-Tech stack: Python, PyTorch, JavaScript, TypeScript, React, Web Worker.
+Tech stack: Rust, WebAssembly, Python, PyTorch, TypeScript, React.
 
 ## Running locally
 
-- Python game: `python3 play_tank_trouble.py`
 - Browser arena: `cd web && npm install && npm run dev`
+- Python game: `python3 play_tank_trouble.py`

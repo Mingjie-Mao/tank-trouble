@@ -145,12 +145,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .report-head p { max-width: 820px; margin: 0; color: var(--muted); line-height: 1.65; }
 .report section { margin-top: 30px; }
 .report h2 { margin: 0 0 12px; font-size: 19px; letter-spacing: -0.02em; }
-.cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 .card { display: flex; flex-direction: column; gap: 4px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
 .card span, .card small { color: var(--muted); font-size: 13px; }
 .card strong { font-size: 18px; }
 .card b { font-size: 40px; letter-spacing: -0.04em; color: var(--red-dark); }
-.pipeline { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.pipeline { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
 .step { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: #fff; text-align: left; cursor: pointer; }
 .step span { color: var(--muted); font-size: 12px; font-weight: 700; }
 .step strong { font-size: 14px; }
@@ -196,6 +196,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .report-link { display: inline-flex; align-items: center; text-decoration: none; color: var(--ink); }
 
 @media (max-width: 860px) {
-  .pipeline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pipeline { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .two-up, .cards { grid-template-columns: 1fr; }
 }

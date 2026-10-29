@@ -1,9 +1,10 @@
-# Engine — the original game in Python and JavaScript, checked frame by frame
+# Engine — the original game in Python and Rust, checked frame by frame
 
 `tank_trouble_original/` is a Python port of the decompiled Flash game
 (`swf_decompiled/`; mapping in [PORT_NOTES.md](PORT_NOTES.md)), checked by
-`test_original_port.py`. `web/lib/engine/` translates it module by module to
-JavaScript; the browser arena, the RL environment, Laika and Tactical all run on it.
+`test_original_port.py`. `engine/core/` translates it module by module to
+Rust; training (through `engine/py`), the search and the browser arena
+(through `engine/wasm`) all run on it, about 150,000 frames/s on one core.
 
 ## Parity
 
@@ -11,7 +12,7 @@ JavaScript; the browser arena, the RL environment, Laika and Tactical all run on
 every reset included) in Python with Laika on tank 1 and a scripted input
 stream on tank 0, recording per frame a hash of the discrete state (counters,
 scores, flags, ammo, buttons, bullets, events) and the continuous state
-rounded to 1e-6. `web/tests/engine-parity.test.mjs` replays it in JS:
+rounded to 1e-6. `engine/core/tests/parity.rs` replays it in Rust:
 **the discrete state matches on all 30,000 frames and every float is within
 1e-6.**
 
@@ -19,8 +20,8 @@ This needed CPython's `random.Random` reproduced bit for bit (MT19937, its
 seeding, 53-bit `random()`, rejection-sampled `randrange()`), so a seed gives
 the same maze, spawns and Laika coin flips in both languages, and Python's
 round-half-to-even in Laika. Floats agree to ~1e-14 rather than exactly
-because Python's libm and V8 round some sines and cosines differently in the
-last bit; it never changes a discrete outcome.
+because the platform libm and Rust round some sines and cosines differently
+in the last bit; it never changes a discrete outcome.
 
 ## What the original does
 
