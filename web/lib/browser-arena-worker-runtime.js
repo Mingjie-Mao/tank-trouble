@@ -1,5 +1,5 @@
 import { BrowserArena, loadArena } from "./browser-arena.js";
-import { SearchPool, searchFor } from "./search-pool.js";
+import { SearchPool, SearchSizer, searchFor } from "./search-pool.js";
 
 const FRAME_MS = 1000 / 25;
 const BUDGET_MS = 30;
@@ -24,6 +24,8 @@ export class BrowserArenaWorkerRuntime {
     this.nextFrameAt = 0;
     this.inFlight = Promise.resolve();
     this.budgetMs = BUDGET_MS;
+    this.sizer = null;
+    this.resize = null;
   }
 
   async handle(message) {
@@ -36,9 +38,12 @@ export class BrowserArenaWorkerRuntime {
       this.arena = new BrowserArena({ seed });
       this.pool?.break();
       this.pool = null;
+      this.sizer = null;
       if (message.helpers?.length) {
         this.pool = new SearchPool(message.helpers, { onBroken: () => this.narrow() });
         this.pool.broadcast({ type: "init", wasm: message.wasm, seed });
+        this.sizer = message.adaptive === false ? null : new SearchSizer(this.pool.workers);
+        this.resize = null;
         this.apply({ action: "search", ...searchFor(this.pool.workers), budget_ms: this.budgetMs });
       }
       const state = this.state();
@@ -95,8 +100,15 @@ export class BrowserArenaWorkerRuntime {
     if (this.arena === null) throw new Error("browser arena worker is not initialised");
     const pool = this.pool && !this.pool.broken ? this.pool : null;
     if (pool) {
-      const state = await this.arena.stepWith((plan) => pool.search(plan, (request) => this.arena.rollouts(request), this.budgetMs), now);
+      const state = await this.arena.stepWith(async (plan) => {
+        const values = await pool.search(plan, (request) => this.arena.rollouts(request), this.budgetMs);
+        this.resize = this.sizer?.record(values) ?? this.resize;
+        return values;
+      }, now);
       if (!state.paused && !pool.broken) pool.broadcast({ type: "follow", frame: this.arena.frame() });
+      // Between frames, so no search changes size halfway.
+      if (this.resize && !pool.broken) this.apply({ action: "search", ...this.resize, budget_ms: this.budgetMs });
+      this.resize = null;
     } else {
       this.arena.step(now);
     }

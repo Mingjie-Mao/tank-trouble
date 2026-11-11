@@ -293,18 +293,22 @@ fn teacher_labels<'py>(py: Python<'py>, policy_path: &str, seeds: Vec<u64>, cand
 /// (the policy's own choice kept unless another is strictly better); with
 /// `particles`, the search plays against copies of Laika kept in step with
 /// the real one's visible moves instead of a fresh one.
+/// With `cuts`, each search keeps only the rollouts one of them (of its
+/// length, candidate-major, true where played) marks, drawn at random: a
+/// deadline's cuts replayed; `cuts_after`, if given, replaces them once Laika is dead.
 /// Returns (outcome codes, every decision's milliseconds, negated when no search ran).
 #[pyfunction]
-#[pyo3(signature = (policy_path, seeds, mpc=false, candidates=2, rollouts=2, horizon=24, threads=9, particles=0))]
+#[pyo3(signature = (policy_path, seeds, mpc=false, candidates=2, rollouts=2, horizon=24, threads=9, particles=0, cuts=None, cuts_after=None))]
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn play<'py>(py: Python<'py>, policy_path: &str, seeds: Vec<u64>, mpc: bool, candidates: usize, rollouts: usize,
-             horizon: usize, threads: usize, particles: usize) -> PyResult<(Bound<'py, PyArray1<i8>>, Bound<'py, PyArray1<f32>>)> {
+             horizon: usize, threads: usize, particles: usize, cuts: Option<Vec<Vec<bool>>>, cuts_after: Option<Vec<Vec<bool>>>) -> PyResult<(Bound<'py, PyArray1<i8>>, Bound<'py, PyArray1<f32>>)> {
     let policy = load_policy(policy_path)?;
     let cfg = TeacherConfig { candidates, rollouts, horizon, ..TeacherConfig::default() };
     let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
     let results: Vec<(i8, Vec<f32>)> = py.allow_threads(|| pool.install(|| seeds.par_iter().map(|&seed| {
         let mut ep = Episode::new(seed, OpponentKind::Laika, Reward::default());
         let mut rng = Rng::new(seed + 101);
+        let mut cut_rng = Rng::new(seed + 303);
         let mut belief = (particles > 0).then(|| Belief::new(&ep.game, 1, particles, seed + 202));
         let (mut obs, mut mask) = (vec![0f32; policy.obs_dim], vec![0u8; policy.layout[3]]);
         let mut ms = Vec::new();
@@ -319,9 +323,15 @@ fn play<'py>(py: Python<'py>, policy_path: &str, seeds: Vec<u64>, mpc: bool, can
                 searched = mpc && teacher::danger(&ep.game, &policy, &obs);
                 if searched {
                     let copies = belief.as_ref().map_or(&[][..], |b| b.particles());
-                    let s = teacher::scores(&ep, &policy, &probs, action, &cfg, &mut rng, copies);
-                    let best = (0..18).filter(|&a| !s[a].is_nan()).max_by(|&a, &b| s[a].total_cmp(&s[b])).unwrap();
-                    if s[best] > s[action] {
+                    let s = match &cuts {
+                        None => teacher::choice_scores(&ep, &policy, &probs, action, &cfg, &mut rng, copies),
+                        Some(cuts) => {
+                            let cuts = cuts_after.as_ref().filter(|_| !ep.game.tanks[1].alive).unwrap_or(cuts);
+                            cut_scores(&ep, &policy, &probs, action, &cfg, &mut rng, copies, cuts, &mut cut_rng)
+                        }
+                    };
+                    let best = (0..18).filter(|&a| !s[a].is_nan()).max_by(|&a, &b| s[a].total_cmp(&s[b]));
+                    if let Some(best) = best.filter(|&b| s[b] > s[action]) {
                         action = best;
                     }
                 }
@@ -345,6 +355,24 @@ fn play<'py>(py: Python<'py>, policy_path: &str, seeds: Vec<u64>, mpc: bool, can
     }).collect()));
     let ms: Vec<f32> = results.iter().flat_map(|r| r.1.iter().copied()).collect();
     Ok((PyArray1::from_vec(py, results.iter().map(|r| r.0).collect()), PyArray1::from_vec(py, ms)))
+}
+
+/// `teacher::scores` with only the rollouts a random one of `cuts` (of the
+/// search's length) marks as played; a candidate missing one is unscored.
+#[allow(clippy::too_many_arguments)]
+fn cut_scores(ep: &Episode, policy: &Policy, probs: &[f32; 18], sampled: usize, cfg: &TeacherConfig, rng: &mut Rng,
+              belief: &[tank_core::laika::Laika], cuts: &[Vec<bool>], cut_rng: &mut Rng) -> [f32; 18] {
+    let (ranked, seeds) = teacher::plan(probs, sampled, cfg, rng);
+    let n = seeds.len();
+    let fitting: Vec<&Vec<bool>> = cuts.iter().filter(|c| c.len() == ranked.len() * n).collect();
+    let played = (!fitting.is_empty()).then(|| fitting[cut_rng.randrange(fitting.len() as u32) as usize]);
+    let mut out = [f32::NAN; 18];
+    for (i, &a) in ranked.iter().enumerate() {
+        if played.is_none_or(|p| p[i * n..(i + 1) * n].iter().all(|&x| x)) {
+            out[a] = seeds.iter().map(|&s| teacher::rollout_against(ep, policy, a, s, cfg, belief)).sum::<f32>() / cfg.rollouts as f32;
+        }
+    }
+    out
 }
 
 #[pymodule]

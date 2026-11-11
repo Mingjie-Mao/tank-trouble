@@ -26,7 +26,8 @@ impl Default for TeacherConfig {
     }
 }
 
-/// An exchange is on: either barrel holds a hit, or some move is forecast to die.
+/// An exchange is on: either barrel holds a hit, or some move is forecast to
+/// die; once the other tank is dead, while any bullet is still flying.
 pub fn danger(g: &Game, policy: &Policy, obs: &[f32]) -> bool {
     danger_for(g, 0, policy, obs)
 }
@@ -35,10 +36,13 @@ pub fn danger(g: &Game, policy: &Policy, obs: &[f32]) -> bool {
 pub fn danger_for(g: &Game, seat: usize, policy: &Policy, obs: &[f32]) -> bool {
     let other = 1 - seat;
     let (me, them) = (&g.tanks[seat], &g.tanks[other]);
-    if !me.alive || !them.alive || g.frozen {
+    if !me.alive || g.frozen {
         return false;
     }
     let dodge = &obs[policy.layout[5]..policy.layout[5] + 9];
+    if !them.alive {
+        return g.bullets.iter().any(|b| !b.removed);
+    }
     dodge.iter().any(|&d| d < 0.0)
         || laika_aim_hits(g, seat, other, me.rotation)
         || laika_aim_hits(g, other, seat, them.rotation)
@@ -73,7 +77,8 @@ fn rollout(ep: &Episode, policy: &Policy, first: usize, seed: u64, cfg: &Teacher
     let mut obs = vec![0f32; policy.obs_dim];
     let mut mask = vec![0u8; policy.layout[3]];
     let mut action = first;
-    for t in 0..cfg.horizon {
+    let horizon = if ep.game.tanks[1].alive { cfg.horizon } else { 2 * cfg.horizon };
+    for t in 0..horizon {
         if r.game.frozen {
             break;
         }
@@ -104,6 +109,21 @@ pub fn scores(ep: &Episode, policy: &Policy, probs: &[f32; 18], sampled: usize, 
     let mut out = [f32::NAN; 18];
     for a in ranked {
         out[a] = seeds.iter().map(|&s| rollout_against(ep, policy, a, s, cfg, belief)).sum::<f32>() / cfg.rollouts as f32;
+    }
+    out
+}
+
+/// `scores` for choosing a move: once the sampled move scores the most a
+/// rollout can (1), the others go unscored, since none can beat it.
+pub fn choice_scores(ep: &Episode, policy: &Policy, probs: &[f32; 18], sampled: usize, cfg: &TeacherConfig, rng: &mut Rng,
+                     belief: &[Laika]) -> [f32; 18] {
+    let (ranked, seeds) = plan(probs, sampled, cfg, rng);
+    let mut out = [f32::NAN; 18];
+    for a in ranked {
+        out[a] = seeds.iter().map(|&s| rollout_against(ep, policy, a, s, cfg, belief)).sum::<f32>() / cfg.rollouts as f32;
+        if a == sampled && out[a] >= 1.0 {
+            break;
+        }
     }
     out
 }

@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { BrowserArena } from "../lib/browser-arena.js";
 import { BrowserArenaWorkerRuntime } from "../lib/browser-arena-worker-runtime.js";
-import { SearchHelper } from "../lib/search-pool.js";
+import { SearchHelper, SearchSizer } from "../lib/search-pool.js";
 
 const wasm = readFileSync(new URL("../lib/wasm/tank_bg.wasm", import.meta.url));
 
@@ -58,4 +58,25 @@ test("helpers share the search without changing a move", async (t) => {
   assert.equal(state.runtime.search_workers, 7);
   assert.ok(state.telemetry.searches > 10, `only ${state.telemetry.searches} searches`);
   assert.equal(runtime.pool.broken, false);
+});
+
+// Slowed (most rollouts unplayed) the search narrows to 2×2; played again, it widens back.
+test("the search narrows while the page is slowed", async (t) => {
+  const sizer = new SearchSizer(8);
+  const searches = (played, n) => Array.from({ length: n }, () => sizer.record(Array.from({ length: 16 }, (_, k) => (k < played ? 0 : null))));
+  assert.deepEqual(searches(15, 40).filter(Boolean), []);
+  assert.deepEqual(searches(5, 16).filter(Boolean), [{ candidates: 2, rollouts: 2 }]);
+  assert.deepEqual(searches(13, 40).filter(Boolean), []);
+  assert.deepEqual(searches(16, 16).filter(Boolean), [{ candidates: 4, rollouts: 4 }]);
+  assert.equal(new SearchSizer(4).record([null, null]), null);
+
+  // Helpers that never answer: each search plays only this worker's share.
+  const helpers = Array.from({ length: 6 }, () => new MessageChannel());
+  t.after(() => helpers.forEach((channel) => channel.port1.close()));
+  const runtime = new BrowserArenaWorkerRuntime();
+  await runtime.handle({ type: "init", seed: 1010043, autostart: false, wasm, helpers: helpers.map((c) => c.port1), budget_ms: 1 });
+  let state = null;
+  for (let frame = 0; frame < 600 && !(state?.telemetry.search === "2×2"); frame += 1) state = await runtime.advance(frame * 40);
+  assert.equal(state.telemetry.search, "2×2", `still ${state.telemetry.search} after ${state.telemetry.searches} searches`);
+  assert.equal(state.runtime.search_workers, 7);
 });

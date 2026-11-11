@@ -12,20 +12,43 @@ it visibly does.
 
 | Agent | Observation | True win rate vs Laika | Decision time in the browser |
 |---|---:|---:|---|
-| **Network + 4×4 real-time search against tracked Laika** (in the demo, 8+ cores) | 230 | **98.92%** | 0.3 ms; on danger frames p50 20 ms, max 32 ms |
+| **Network + 4×4 real-time search against tracked Laika, searching on after a kill** (in the demo, 8+ cores) | 230 | **99.45%**\* | 0.3 ms; on danger frames p50 20 ms, 99th percentile 31 ms |
+| Network + 4×4 real-time search against tracked Laika | 230 | 98.92% | 0.3 ms; on danger frames p50 20 ms, max 32 ms |
 | Network + 2×2 real-time search against tracked Laika (in the demo, fewer cores) | 230 | 98.53% | 0.3 ms; on danger frames p50 23 ms, max 33 ms |
 | Network + real-time search against a fresh Laika | 230 | 97.04% | 0.3 ms; on danger frames p50 25 ms, max 33 ms |
 | Network alone | 230 | 96.67% | 0.3 ms |
 | Previous network (1030-value observation adapted from a public project) | 1030 | 95.94% | — |
 
 10,000 rounds on never-used seeds (14,000,000 – 14,009,999), one round per
-seed, actions sampled, shield on. A kill followed by death to a bullet still
+seed, actions sampled, shield on. \*The top row on a second set of never-used
+seeds (15,000,000 – 15,009,999), where the search without it scores 99.25%. A kill followed by death to a bullet still
 in flight is a double KO, not a win; a round undecided after 30 s is a draw.
 Decision times: WebAssembly in Web Workers on an M4 (4×4 with seven helper
 workers); natively 1.5× faster. The evaluations play every search in full;
 in the browser the 30 ms budget cuts 14–35% of 4×4 searches short across
 eight workers (from run to run on the same idle machine), and 41–69% of 2×2
 searches on one.
+
+The cuts cost nothing while the page is in front. Recorded at 25 fps in
+the browser, the 4×4 search loses only the third and fourth candidates'
+rollouts (31% of 900 searches); replaying those cuts on the 10,000
+development seeds gives 99.12%, against 99.07% in full (+0.05pp [−0.04,
++0.14]). Once the window lost focus with the screen dimmed, searches took
+about 55 ms and 94% of 3,757 were cut, mostly down to one rollout: 97.83%,
+−1.24pp [−1.50, −0.98], still +1.26pp over the network alone. Searching on
+after a kill, the page in front cut 27% of 1,132 searches before the kill and
+37% of 1,568 after it; replayed, each in its phase: 99.31% against 99.36% in
+full (−0.05pp [−0.12, +0.02]) and +0.19pp [+0.06, +0.32] over the search
+without it under its own cuts.
+
+A slowed page wants a smaller search. Slowed again (about 8 fps, helpers
+late), searches alternating between 4×4 and 2×2 over the same eight workers
+played 30% and 60% of their rollouts; replayed on 5,000 development seeds,
+2×2 wins 97.78% and 4×4 96.90% (+0.88pp [+0.27, +1.49]). One thread alone
+does worse: it is slowed too, and 95% of its 2×2 searches were cut. So the
+page narrows to 2×2 once the last 16 searches played under half their
+rollouts, and widens back once 2×2 plays over 90%; in front, 4×4 plays 92–96%
+and stays (1,320 searches in Chrome, none narrowed).
 
 | Pre-registered test (paired by seed) | Rounds | Difference, 95% CI |
 |---|---:|---|
@@ -35,6 +58,7 @@ searches on one.
 | Long-trained network (before the teacher) − previous network | 10,000 | +0.66pp [+0.15, +1.17] |
 | Search against tracked Laika − against a fresh Laika (second registration, same seeds) | 10,000 | **+1.49pp [+1.18, +1.80]** |
 | 4×4 − 2×2 search, both against tracked Laika (third registration, same seeds) | 10,000 | **+0.39pp [+0.09, +0.69]** |
+| 4×4 search, searching on after a kill − not (fourth registration, new seeds) | 10,000 | **+0.20pp [+0.11, +0.29]** |
 
 **Against KillField's planner** (no Laika to track; the search runs as against a fresh Laika) (a public Tank Trouble AI; our earlier agent
 built on it beat Laika 91% of the time on this engine), 1,000 rounds, 500 from each seat, both
@@ -143,6 +167,13 @@ share Laika's program — as the fair search already did — not its memory or
 random stream. At least one copy holds the real state exactly on 99.95% of
 frames, for 0.1 ms per frame natively, and each rollout plays one of them.
 The draws are untouched: a 24-frame search cannot see a 30-second clock.
+They are a standoff, not a hunt gone wrong. Replaying the 31 development
+draws of the 4×4 search: every one runs the full 30 s with the tanks about
+six maze cells apart, in sight of each other 6% of the time (won rounds
+start 4.4 cells apart, draws 7.4). Laika charges in during the first three
+seconds, our shots turn it back, and it spends 60% of the rest dodging them
+while we close in at 0.14 cells a second; nearly nine kills in ten are made within
+three cells.
 
 ## A wider search, in parallel
 
@@ -172,6 +203,39 @@ the network's layers transposed to accumulate a row at a time, the hit test's
 rotation computed once behind an exact bounding-box check, the wall grid's
 buckets stored flat.
 
+## Searching on after a kill
+
+The 4×4 search's 44 double KOs on the development seeds were almost all one
+mistake: in 37 Laika died first, and within the 125 frames before the round
+ends our tank was hit by its own rebounding bullet (26) or one of Laika's
+still in flight (11). The search never saw them coming, because with the
+opponent dead nothing counted as danger. Now, once Laika is dead, the search
+runs on every frame while any bullet flies, its rollouts 48 frames long
+instead of 24 (a rebound takes longer to come back than an aimed shot). It
+stops early once the network's own move survives every rollout, since
+nothing can score more; labels for training still score every candidate.
+
+| 4×4 search against tracked Laika | Win rate | Loss | Double KO | Draw | Difference, 95% CI |
+|---|---:|---:|---:|---:|---|
+| Development seeds, before | 99.07% | 18 | 44 | 31 | |
+| Development seeds, searching on | 99.36% | 18 | 15 | 31 | +0.29pp [+0.18, +0.40] |
+| New held-out seeds, before | 99.25% | 19 | 35 | 21 | |
+| New held-out seeds, searching on | 99.45% | 19 | 15 | 21 | **+0.20pp [+0.11, +0.29]** |
+
+Losses and draws do not move; on the held-out seeds 20 double KOs became wins
+and no win was lost. With 2×2 the development seeds gain +0.16pp [+0.06,
++0.26]. Of the 13 of the 44 replayed double KOs still lost, 6 cannot be saved by
+any move after the kill: our tank died first or on the same frame.
+
+Of the 37 losses left on the development and new held-out seeds, 9 were our
+own shot: the engine moves a tank before it fires, and the shield judged a
+shot from the barrel before the move, so a shot fired while turning towards a
+wall came back a frame later. Vetoing such shots, judged from each move's
+barrel, turned 10 of the 37 into wins but is rare in play: 99.39% against
+99.36% on the development seeds (+0.03pp [−0.04, +0.10]), not shipped. Of the
+rest, 13 are Laika's aimed shots at close range and about 15 rebounds that
+were sealed beyond the 24-frame forecast in a narrow corridor.
+
 ## What did not help
 
 | Idea | Result |
@@ -186,7 +250,10 @@ buckets stored flat.
 | Against tracked Laika: 4 candidates × 1 rollout | 98.60% vs 98.67% for 2×2 (3,000 rounds) |
 | Laika's tracked memory and a 24-frame forecast of it as 18 more inputs (fine-tuned 20–40M steps) | 98.37% at best, vs 98.73%: fewer losses (35 vs 42), twice the draws (84) — it learned to keep out of Laika's way, not to hunt it; with draws at −2, 98.75% (+0.02pp). True memory instead of tracked: same result, so not a tracking error |
 | Hunting late in the round: from frame 375, every 4th calm frame searched too (48 frames × 1, or 24 × 2) | 98.73% and 98.67% vs 98.73%: about 33 draws turned into wins and as many wins into draws — the long rounds' results reshuffle with the random stream, no kill is found that was not there |
+| Holding fire beyond 4, 5 or 7 maze cells unless the shot is forecast to hit, so Laika stops dodging and comes (network alone, 10,000 development rounds) | −0.10 to −0.04pp; draws 57 → 65–71 |
+| Vetoing shots that hit the shooter, judged from each move's barrel | 10 of 37 losses turned into wins; +0.03pp [−0.04, +0.10] on 10,000 development rounds |
 | A second round of expert iteration, from the improved network | no change |
+| Expert iteration with a teacher that searches against tracked Laika (6,000 rounds of labels, 10,000 development rounds) | +0.08pp [−0.17, +0.33] with 4×4 search; −0.07pp with 2×2; network alone −0.46pp |
 | A 512-unit trunk | steadier at 30M steps, same after the full recipe; −0.62pp [−1.08, −0.16] with search |
 
 ## Reproduction

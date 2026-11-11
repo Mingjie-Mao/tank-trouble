@@ -1,6 +1,6 @@
 //! Replay rounds exactly as `tank_rl.play(mpc=True, particles=16)` plays them
 //! and describe each one that is not a win, one JSON line per round:
-//! `failures <policy> <seeds file, one per line> [threads]`.
+//! `failures <policy> <seeds file, one per line> [threads] [candidates rollouts]`.
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -30,8 +30,7 @@ fn line_of_sight(g: &tank_core::game::Game) -> bool {
     })
 }
 
-fn replay(policy: &Policy, seed: u64) -> Option<String> {
-    let cfg = TeacherConfig { candidates: 2, rollouts: 2, horizon: 24, ..TeacherConfig::default() };
+fn replay(policy: &Policy, seed: u64, cfg: &TeacherConfig) -> Option<String> {
     let mut ep = Episode::new(seed, OpponentKind::Laika, Reward::default());
     let mut rng = Rng::new(seed + 101);
     let mut belief = Belief::new(&ep.game, 1, 16, seed + 202);
@@ -41,6 +40,7 @@ fn replay(policy: &Policy, seed: u64) -> Option<String> {
     let mut deaths: Vec<String> = Vec::new();
     let mut shots = [0u32; 2];
     let mut my_death_frame: Option<u32> = None;
+    let mut laika_death_frame: Option<u32> = None;
     while ep.outcome == Outcome::Running {
         let mut action = 0;
         let g = &ep.game;
@@ -50,7 +50,7 @@ fn replay(policy: &Policy, seed: u64) -> Option<String> {
             let probs = policy.shielded_probs(&o, &m);
             action = teacher::sample(&probs, &mut rng);
             if teacher::danger(&ep.game, policy, &o) {
-                let s = teacher::scores(&ep, policy, &probs, action, &cfg, &mut rng, belief.particles());
+                let s = teacher::choice_scores(&ep, policy, &probs, action, cfg, &mut rng, belief.particles());
                 let best = (0..18).filter(|&a| !s[a].is_nan()).max_by(|&a, &b| s[a].total_cmp(&s[b])).unwrap();
                 f.searched = true;
                 if s[best] > s[action] {
@@ -84,6 +84,9 @@ fn replay(policy: &Policy, seed: u64) -> Option<String> {
                     if *victim == 0 && my_death_frame.is_none() {
                         my_death_frame = Some(now);
                     }
+                    if *victim == 1 && laika_death_frame.is_none() {
+                        laika_death_frame = Some(now);
+                    }
                     deaths.push(format!("{{\"frame\":{now},\"owner\":{owner},\"victim\":{victim},\"age\":{age},\"bounced\":{bounced}}}"));
                 }
                 _ => {}
@@ -103,19 +106,26 @@ fn replay(policy: &Policy, seed: u64) -> Option<String> {
     let tail = &frames[cut.saturating_sub(25)..cut];
     let long_tail = &frames[cut.saturating_sub(40)..cut];
     let outcome = format!("{:?}", ep.outcome);
+    // From Laika's death to mine, when it died first.
+    let after = match laika_death_frame {
+        Some(l) if (l as usize) < cut => &frames[l as usize..cut],
+        _ => &frames[0..0],
+    };
     let los_share = frames.iter().filter(|f| f.los).count() as f64 / end.max(1) as f64;
     let g = &ep.game;
     let path = g.round.cell_dist((g.tanks[0].x / g.scale()) as i32, (g.tanks[0].y / g.scale()) as i32,
                                  (g.tanks[1].x / g.scale()) as i32, (g.tanks[1].y / g.scale()) as i32);
     Some(format!(
         "{{\"seed\":{seed},\"outcome\":\"{outcome}\",\"frames\":{},\"deaths\":[{}],\"my_death_first\":{},\
-\"tail_searched\":{},\"tail_changed\":{},\"tail_min_safe\":{},\"tail_unsafe_choice\":{},\"safe_tail\":[{}],\"search_tail\":[{}],\"shots\":[{},{}],\"los_share\":{los_share:.3},\"end_path\":{}}}",
+\"tail_searched\":{},\"tail_changed\":{},\"tail_min_safe\":{},\"tail_unsafe_choice\":{},\"safe_tail\":[{}],\"search_tail\":[{}],\"shots\":[{},{}],\"los_share\":{los_share:.3},\"end_path\":{},\"after_laika\":{{\"frames\":{},\"searched\":{},\"min_safe\":{},\"unsafe_choice\":{},\"safe\":[{}]}}}}",
         ep.frames, deaths.join(","), my_death == Some(0),
         tail.iter().filter(|f| f.searched).count(), tail.iter().filter(|f| f.changed).count(),
         tail.iter().map(|f| f.safe_moves).min().unwrap_or(9), tail.iter().filter(|f| !f.chosen_safe).count(),
         long_tail.iter().map(|f| f.safe_moves.to_string()).collect::<Vec<_>>().join(","),
         long_tail.iter().map(|f| (f.searched as u8 + f.changed as u8).to_string()).collect::<Vec<_>>().join(","),
-        shots[0], shots[1], if path.is_finite() { path } else { -1.0 }))
+        shots[0], shots[1], if path.is_finite() { path } else { -1.0 },
+        after.len(), after.iter().filter(|f| f.searched).count(), after.iter().map(|f| f.safe_moves).min().unwrap_or(9),
+        after.iter().filter(|f| !f.chosen_safe).count(), after.iter().map(|f| f.safe_moves.to_string()).collect::<Vec<_>>().join(",")))
 }
 
 fn main() {
@@ -124,10 +134,12 @@ fn main() {
     assert_eq!(policy.obs_dim, obs::OBS_DIM);
     let seeds: Vec<u64> = std::fs::read_to_string(&a[2]).unwrap().lines().filter_map(|l| l.trim().parse().ok()).collect();
     let threads: usize = a.get(3).map_or(9, |t| t.parse().unwrap());
+    let n = |i: usize| a.get(i).map_or(2, |t| t.parse().unwrap());
+    let cfg = TeacherConfig { candidates: n(4), rollouts: n(5), horizon: 24, ..TeacherConfig::default() };
     let chunks: Vec<Vec<u64>> = (0..threads).map(|i| seeds.iter().skip(i).step_by(threads).copied().collect()).collect();
     let handles: Vec<_> = chunks.into_iter().map(|chunk| {
-        let policy = policy.clone();
-        std::thread::spawn(move || chunk.iter().map(|&s| (s, replay(&policy, s))).collect::<Vec<_>>())
+        let (policy, cfg) = (policy.clone(), cfg.clone());
+        std::thread::spawn(move || chunk.iter().map(|&s| (s, replay(&policy, s, &cfg))).collect::<Vec<_>>())
     }).collect();
     let mut all: Vec<(u64, Option<String>)> = handles.into_iter().flat_map(|h| h.join().unwrap()).collect();
     all.sort_by_key(|r| r.0);

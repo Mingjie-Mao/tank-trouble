@@ -9,6 +9,40 @@ export function searchFor(workers) {
   return workers >= 7 ? { candidates: 4, rollouts: 4 } : { candidates: 2, rollouts: 2 };
 }
 
+/**
+ * Narrows the search while the page is slowed. Measured in Chrome over eight
+ * workers, a 4×4 search in front plays 92–96% of its rollouts and a 2×2 one
+ * about 100%; slowed in the background they play about 30% and 60%, and there
+ * 2×2 wins 0.9 points more. So: 2×2 once the last `window` searches played
+ * under `low` of their rollouts, back to the full size once 2×2 plays over
+ * `high`. `record` returns the size to switch to, or null.
+ */
+export class SearchSizer {
+  constructor(workers, { window = 16, low = 0.5, high = 0.9 } = {}) {
+    this.full = searchFor(workers);
+    this.small = searchFor(1);
+    this.current = this.full;
+    this.window = window;
+    this.low = low;
+    this.high = high;
+    this.played = [];
+  }
+
+  record(values) {
+    if (this.full.candidates === this.small.candidates || !values.length) return null;
+    this.played.push(values.filter((v) => v !== null).length / values.length);
+    if (this.played.length < this.window) return null;
+    const mean = this.played.reduce((a, b) => a + b, 0) / this.played.length;
+    this.played.shift();
+    const next = this.current === this.full ? (mean < this.low ? this.small : null) : (mean > this.high ? this.full : null);
+    if (next) {
+      this.current = next;
+      this.played = [];
+    }
+    return next;
+  }
+}
+
 /** How long past the budget a helper's answer is still waited for. */
 const GRACE_MS = 5;
 

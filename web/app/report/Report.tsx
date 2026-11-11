@@ -10,13 +10,18 @@ type T = { zh: string; en: string };
 // docs/REPORT.md.
 
 const RESULTS: { name: T; sub: T; rate: string; detail: T; time: T }[] = [
+  { name: { zh: "网络 + 4×4 搜索，跟踪 Laika，击杀后继续搜索", en: "Network + 4×4 search, tracking Laika, searching on after a kill" },
+    sub: { zh: "网页演示，8 核及以上 · 第二组留出种子", en: "In the demo, 8+ cores · second held-out seed set" },
+    rate: "99.45%",
+    detail: { zh: "1 万局 · 胜 9945 · 双亡 15 · 负 19 · 平 21（同种子不继续搜索 99.25%）", en: "10,000 rounds · 9945 W · 15 double KO · 19 L · 21 draws (99.25% without, same seeds)" },
+    time: { zh: "浏览器每帧 0.3 ms，危险帧 p50 20 ms（8 个线程）", en: "0.3 ms per frame in the browser, danger frames p50 20 ms (8 threads)" } },
   { name: { zh: "网络 + 4×4 搜索，跟踪 Laika", en: "Network + 4×4 search, tracking Laika" },
-    sub: { zh: "网页演示，8 核及以上", en: "In the demo, 8+ cores" },
+    sub: { zh: "击杀后不再搜索", en: "No search after a kill" },
     rate: "98.92%",
     detail: { zh: "1 万局 · 胜 9892 · 双亡 32 · 负 27 · 平 49", en: "10,000 rounds · 9892 W · 32 double KO · 27 L · 49 draws" },
     time: { zh: "浏览器每帧 0.3 ms，危险帧 p50 20 ms（8 个线程）", en: "0.3 ms per frame in the browser, danger frames p50 20 ms (8 threads)" } },
   { name: { zh: "网络 + 2×2 搜索，跟踪 Laika", en: "Network + 2×2 search, tracking Laika" },
-    sub: { zh: "网页演示，核数更少时", en: "In the demo, fewer cores" },
+    sub: { zh: "核数更少时的网页演示（未含击杀后搜索）", en: "The demo on fewer cores (before searching on after a kill)" },
     rate: "98.53%",
     detail: { zh: "1 万局 · 胜 9853 · 双亡 45 · 负 40 · 平 62", en: "10,000 rounds · 9853 W · 45 double KO · 40 L · 62 draws" },
     time: { zh: "浏览器每帧 0.3 ms，危险帧 p50 23 ms", en: "0.3 ms per frame in the browser, danger frames p50 23 ms" } },
@@ -81,6 +86,14 @@ const PIPELINE: { title: T; stat: string; body: T }[] = [
       en: "Once the search's Laika is right, compute pays: 4 candidates × 4 rollouts beat 2×2 by 0.34pp on development seeds and reach 98.92% held out, losses down from 40 to 27. Up to 20 rollouts do not fit one thread's 30 ms, so they are shared among up to eight Web Workers, each helper holding a copy of the arena that replays every command and every frame's moves and checks a fingerprint of the state; an answer 5 ms late counts as unplayed, and a copy that drifts drops the search to one worker and 2×2. The rollout itself got faster too, 2.9 ms, bit for bit the same.",
     },
   },
+  {
+    title: { zh: "击杀后继续搜索", en: "Searching on after a kill" },
+    stat: "99.45%",
+    body: {
+      zh: "开发集 44 局双亡里 37 局是 Laika 先死、我们在回合结束前的 125 帧里被自己反弹的子弹（26）或 Laika 还在飞的子弹（11）打死：对手一死就不算危险，搜索根本没跑。现在 Laika 死后只要还有子弹在飞就每帧搜索，推演 48 帧（反弹回来比直射慢）；网络自己的动作每次推演都活下来就提前停，结果不变。新的留出种子上 99.25% → 99.45%，+0.20 个百分点 [+0.11, +0.29]，双亡 35 → 15，没有一局由胜转负。浏览器截断回放后仍比不搜索高 0.19 个百分点。页面变慢（后台约 8 fps）时 4×4 只能算完 30% 的推演、2×2 能算完 60%，回放 5000 局 2×2 高 0.88 个百分点 [+0.27, +1.49]，所以最近 16 次搜索算完不到一半就自动缩到 2×2，恢复后再放宽。",
+      en: "Of the 44 double KOs on development seeds, 37 came after Laika died first: in the 125 frames before the round ends our tank was hit by its own rebound (26) or one of Laika's bullets still in flight (11), because with the opponent dead nothing counted as danger and the search never ran. Now, once Laika is dead, every frame with a bullet in flight is searched, 48 frames ahead (a rebound takes longer than an aimed shot); it stops early once the network's own move survives every rollout, without changing a result. On new held-out seeds 99.25% → 99.45%, +0.20pp [+0.11, +0.29], double KOs 35 → 15, no win lost. With the browser's cuts replayed it still gains 0.19pp. On a slowed page (about 8 fps in the background) 4×4 plays 30% of its rollouts and 2×2 60%, and replayed on 5,000 rounds 2×2 wins 0.88pp more [+0.27, +1.49]; so once the last 16 searches played under half, the page narrows to 2×2, and widens back once it recovers.",
+    },
+  },
 ];
 
 const PAIRED: { label: T; d: number; lo: number; hi: number; n: string; ok: boolean }[] = [
@@ -91,6 +104,7 @@ const PAIRED: { label: T; d: number; lo: number; hi: number; n: string; ok: bool
   { label: { zh: "网络 + 搜索 − 网络", en: "Network + search − network" }, d: 0.37, lo: -0.11, hi: 0.85, n: "10,000", ok: false },
   { label: { zh: "跟踪 Laika − 从零重建", en: "Tracked Laika − fresh Laika" }, d: 1.49, lo: 1.18, hi: 1.80, n: "10,000", ok: true },
   { label: { zh: "4×4 − 2×2，都跟踪 Laika", en: "4×4 − 2×2, both tracking" }, d: 0.39, lo: 0.09, hi: 0.69, n: "10,000", ok: true },
+  { label: { zh: "击杀后继续搜索 − 不搜索（新种子）", en: "Searching on after a kill − not (new seeds)" }, d: 0.20, lo: 0.11, hi: 0.29, n: "10,000", ok: true },
 ];
 
 const SEEDS: { label: T; runs: number[] }[] = [
@@ -124,6 +138,7 @@ const NEGATIVE: { idea: T; result: T }[] = [
   { idea: { zh: "用价值网络给未分胜负的推演打分", en: "Scoring undecided rollouts by the critic" }, result: { zh: "学生一样，标注慢 2.5 倍", en: "same student, labelling 2.5× slower" } },
   { idea: { zh: "更宽的实时搜索（3×3），Laika 从零重建", en: "A wider real-time search (3×3), Laika rebuilt from scratch" }, result: { zh: "不比 2×2 强，慢一倍", en: "no stronger than 2×2, twice as slow" } },
   { idea: { zh: "更强的搜索（4×8、32 帧），Laika 从零重建", en: "A stronger search (4×8, 32 frames), Laika rebuilt from scratch" }, result: { zh: "+0.35，不显著（6000 局）——缺的是对 Laika 的了解，不是算力", en: "+0.35pp, not significant (6,000 rounds) — what was missing was knowledge of Laika, not compute" } },
+  { idea: { zh: "否决会打到自己的开火（按移动后的炮口判断）", en: "Vetoing shots that hit the shooter, judged from the barrel after the move" }, result: { zh: "37 局负局里 10 局转胜，但实战罕见：开发集 +0.03 [−0.04, +0.10]，未上线", en: "10 of 37 losses turned into wins, but rare in play: +0.03pp [−0.04, +0.10] on development seeds, not shipped" } },
   { idea: { zh: "第二轮专家迭代", en: "A second round of expert iteration" }, result: { zh: "持平", en: "no change" } },
   { idea: { zh: "网络加宽到 512", en: "A 512-unit network" }, result: { zh: "训练更稳，最终持平；加搜索后 −0.62", en: "steadier training, same end point; −0.62pp with search" } },
 ];
